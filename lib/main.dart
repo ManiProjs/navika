@@ -2016,11 +2016,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 26),
           _sectionTitle(
-            'All tracks',
+            'Recommended for you',
             action: 'Shuffle',
             onAction: () {
-              if (_tracks.isEmpty) return;
-              final shuffled = List<MusicTrack>.from(_tracks)..shuffle();
+              final picks = _recommended();
+              if (picks.isEmpty) return;
+              final shuffled = List<MusicTrack>.from(picks)..shuffle();
               _play(shuffled.first, playlist: shuffled);
             },
           ),
@@ -2046,8 +2047,8 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () => _loadLibrary(force: true),
             )
           else
-            ..._tracks
-                .take(300)
+            ..._recommended()
+                .take(30)
                 .toList()
                 .asMap()
                 .entries
