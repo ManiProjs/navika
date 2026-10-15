@@ -2511,14 +2511,15 @@ class _HomeScreenState extends State<HomeScreen> {
         ? 0.0
         : (position / duration).clamp(0.0, 1.0);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: SizedBox(
-        width: double.infinity,
-        child: Material(
-          color: C.surface,
-          borderRadius: BorderRadius.circular(14),
-          clipBehavior: Clip.antiAlias,
+    return SizedBox(
+      width: double.infinity,
+      child: Material(
+        color: C.surface,
+        clipBehavior: Clip.antiAlias,
+        child: Container(
+          decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: C.border)),
+          ),
           child: Stack(
             children: [
               Padding(

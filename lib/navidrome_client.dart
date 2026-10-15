@@ -282,8 +282,25 @@ List<MusicTrack> recommendTracks(
   final artistCounts = <String, double>{};
   final albumCounts = <String, double>{};
   final trackCounts = <String, double>{};
+  final libraryArtistCounts = <String, int>{};
+  final libraryAlbumCounts = <String, int>{};
   final favoriteArtists = <String, int>{};
   final favoriteAlbums = <String, int>{};
+
+  // Treat the actual library as the recommendation universe and learn its
+  // artist/album shape before applying listening-history personalization.
+  for (final track in tracks) {
+    libraryArtistCounts.update(
+      track.artist.toLowerCase(),
+      (count) => count + 1,
+      ifAbsent: () => 1,
+    );
+    libraryAlbumCounts.update(
+      '${track.album.toLowerCase()}::${track.artist.toLowerCase()}',
+      (count) => count + 1,
+      ifAbsent: () => 1,
+    );
+  }
 
   for (final track in tracks.where((track) => favoriteIds.contains(track.id))) {
     favoriteArtists.update(
@@ -327,17 +344,22 @@ List<MusicTrack> recommendTracks(
   final ranked = tracks.where((track) => track.id != currentId).map((track) {
     final artist = track.artist.toLowerCase();
     final album = track.album.toLowerCase();
+    final albumKey = '$album::$artist';
 
     // Lightweight on-device personalization: favor familiar artists/albums,
     // give favorites a boost, and avoid repeating the same tracks too often.
     // This is intentionally explainable and needs no cloud AI service or key.
     final score =
-        (artistCounts[artist] ?? 0) * 1.8 +
-        (albumCounts[album] ?? 0) * 1.15 +
-        (favoriteArtists[artist] ?? 0) * 2.4 +
-        (favoriteAlbums[album] ?? 0) * 1.4 -
-        (trackCounts[track.id] ?? 0) * 1.25 +
-        (favoriteIds.contains(track.id) ? 1.8 : 0) +
+        (artistCounts[artist] ?? 0) * 2.0 +
+        (albumCounts[album] ?? 0) * 1.5 +
+        (favoriteArtists[artist] ?? 0) * 2.8 +
+        (favoriteAlbums[album] ?? 0) * 1.8 -
+        (trackCounts[track.id] ?? 0) * 1.5 +
+        (favoriteIds.contains(track.id) ? 2.0 : 0) +
+        // Favor complete album journeys and artists already represented in
+        // the user's collection, without letting large catalogs dominate.
+        min((libraryAlbumCounts[albumKey] ?? 1) - 1, 6) * .12 +
+        ((libraryArtistCounts[artist] ?? 1) > 1 ? .15 : 0) +
         // Small stable tie-breaker so equal scores do not jump around.
         (track.id.isEmpty
                 ? 0
