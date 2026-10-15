@@ -58,6 +58,9 @@ const _motionKey = 'navika.reduce-motion';
 const _playlistsKey = 'navika.local.playlists';
 const _autoAdvanceKey = 'navika.playback.auto-advance';
 const _visualizerKey = 'navika.playback.visualizer';
+const _shuffleKey = 'navika.playback.shuffle';
+const _repeatAllKey = 'navika.playback.repeat-all';
+const _repeatOneKey = 'navika.playback.repeat-one';
 
 enum AppTab { home, search, library, playlists, favorites, stats }
 
@@ -740,6 +743,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     _autoAdvance = preferences.getBool(_autoAdvanceKey) ?? true;
     _showVisualizer = preferences.getBool(_visualizerKey) ?? false;
+    _shuffle = preferences.getBool(_shuffleKey) ?? false;
+    _repeatAll = preferences.getBool(_repeatAllKey) ?? false;
+    _repeatOne = preferences.getBool(_repeatOneKey) ?? false;
 
     final history = preferences.getString(_historyKey);
     if (history != null) {
@@ -1058,6 +1064,29 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     await _play(_queue[next]);
+  }
+
+  Future<void> _toggleShuffle() async {
+    setState(() => _shuffle = !_shuffle);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_shuffleKey, _shuffle);
+  }
+
+  Future<void> _cycleRepeatMode() async {
+    setState(() {
+      if (!_repeatAll && !_repeatOne) {
+        _repeatAll = true;
+      } else if (_repeatAll) {
+        _repeatAll = false;
+        _repeatOne = true;
+      } else {
+        _repeatOne = false;
+      }
+    });
+    await _player.setLoopMode(_repeatOne ? LoopMode.one : LoopMode.off);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_repeatAllKey, _repeatAll);
+    await preferences.setBool(_repeatOneKey, _repeatOne);
   }
 
   Future<void> _toggleFavorite(MusicTrack track) async {
@@ -3435,9 +3464,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             MainAxisAlignment.center,
                                         children: [
                                           IconButton(
-                                            onPressed: () => setState(
-                                              () => _shuffle = !_shuffle,
-                                            ),
+                                            onPressed: _toggleShuffle,
                                             icon: Icon(
                                               Icons.shuffle_rounded,
                                               color: _shuffle
@@ -3472,9 +3499,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             ),
                                           ),
                                           IconButton(
-                                            onPressed: () => setState(
-                                              () => _repeatAll = !_repeatAll,
-                                            ),
+                                            onPressed: _cycleRepeatMode,
                                             icon: Icon(
                                               Icons.repeat_rounded,
                                               color: _repeatAll
@@ -3728,9 +3753,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                               minWidth: 40,
                                               minHeight: 40,
                                             ),
-                                            onPressed: () => setState(
-                                              () => _shuffle = !_shuffle,
-                                            ),
+                                            onPressed: _toggleShuffle,
                                             icon: Icon(
                                               Icons.shuffle_rounded,
                                               color: _shuffle
@@ -3795,24 +3818,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                               minWidth: 40,
                                               minHeight: 40,
                                             ),
-                                            onPressed: () {
-                                              setState(() {
-                                                if (!_repeatAll &&
-                                                    !_repeatOne) {
-                                                  _repeatAll = true;
-                                                } else if (_repeatAll) {
-                                                  _repeatAll = false;
-                                                  _repeatOne = true;
-                                                } else {
-                                                  _repeatOne = false;
-                                                }
-                                              });
-                                              _player.setLoopMode(
-                                                _repeatOne
-                                                    ? LoopMode.one
-                                                    : LoopMode.off,
-                                              );
-                                            },
+                                            onPressed: _cycleRepeatMode,
                                             icon: Icon(
                                               Icons.repeat_rounded,
                                               color: (_repeatAll || _repeatOne)
@@ -3988,8 +3994,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     minWidth: 40,
                                     minHeight: 40,
                                   ),
-                                  onPressed: () =>
-                                      setState(() => _shuffle = !_shuffle),
+                                  onPressed: _toggleShuffle,
                                   icon: Icon(
                                     Icons.shuffle_rounded,
                                     color: _shuffle ? C.lime : C.muted,
@@ -4042,21 +4047,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     minWidth: 40,
                                     minHeight: 40,
                                   ),
-                                  onPressed: () {
-                                    setState(() {
-                                      if (!_repeatAll && !_repeatOne) {
-                                        _repeatAll = true;
-                                      } else if (_repeatAll) {
-                                        _repeatAll = false;
-                                        _repeatOne = true;
-                                      } else {
-                                        _repeatOne = false;
-                                      }
-                                    });
-                                    _player.setLoopMode(
-                                      _repeatOne ? LoopMode.one : LoopMode.off,
-                                    );
-                                  },
+                                  onPressed: _cycleRepeatMode,
                                   icon: Icon(
                                     Icons.repeat_rounded,
                                     color: (_repeatAll || _repeatOne)
