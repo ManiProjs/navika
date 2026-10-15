@@ -25,14 +25,15 @@ Future<void> main() async {
 }
 
 abstract final class C {
-  static const bg = Color(0xFF10110F);
-  static const surface = Color(0xFF191A17);
-  static const surface2 = Color(0xFF22231F);
-  static const border = Color(0xFF30312B);
-  static const text = Color(0xFFF4F4ED);
-  static const muted = Color(0xFF999B8F);
-  static const lime = Color(0xFFD6FF5F);
-  static const black = Color(0xFF11120F);
+  // Palette sampled from the supplied music-player reference.
+  static const bg = Color(0xFF100F0D);
+  static const surface = Color(0xFF1B1916);
+  static const surface2 = Color(0xFF24211D);
+  static const border = Color(0xFF302D28);
+  static const text = Color(0xFFF5F3EC);
+  static const muted = Color(0xFFA29D91);
+  static const lime = Color(0xFFD6FF39);
+  static const black = Color(0xFF100F0D);
   static const danger = Color(0xFFFF8585);
 }
 
@@ -3204,9 +3205,265 @@ class _HomeScreenState extends State<HomeScreen> {
                       210.0,
                     );
 
-                    if (constraints.maxWidth > 680 && !_showUpNext) {
-                      final desktopArtSize = (constraints.maxHeight * .62)
-                          .clamp(150.0, 320.0);
+                    if (constraints.maxWidth > 680) {
+                      final desktopArtSize = (constraints.maxHeight * .58)
+                          .clamp(180.0, 380.0);
+                      if (_showUpNext) {
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(28, 18, 28, 20),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                flex: 6,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'NOW PLAYING',
+                                      style: TextStyle(
+                                        color: C.muted,
+                                        fontSize: 9,
+                                        letterSpacing: 1.3,
+                                        fontFamily: 'DMSansBold',
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    Center(
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: _artwork(
+                                          track.coverArt,
+                                          size: desktopArtSize,
+                                          seed: track.album,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 20),
+                                    Text(
+                                      track.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontFamily: 'SyneBold',
+                                        fontSize: 25,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${track.artist} · ${track.album}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: C.muted,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    _seekBar(progress, duration),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          _formatTime(position),
+                                          style: const TextStyle(
+                                            color: C.muted,
+                                            fontSize: 10,
+                                          ),
+                                        ),
+                                        Text(
+                                          _formatTime(duration),
+                                          style: const TextStyle(
+                                            color: C.muted,
+                                            fontSize: 10,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        IconButton(
+                                          onPressed: () => setState(
+                                            () => _shuffle = !_shuffle,
+                                          ),
+                                          icon: Icon(
+                                            Icons.shuffle_rounded,
+                                            color: _shuffle ? C.lime : C.muted,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          onPressed: () => _skip(-1),
+                                          icon: const Icon(
+                                            Icons.skip_previous_rounded,
+                                            size: 27,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          onPressed: _togglePlayback,
+                                          icon: Icon(
+                                            _player.playing
+                                                ? Icons
+                                                      .pause_circle_filled_rounded
+                                                : Icons
+                                                      .play_circle_fill_rounded,
+                                            color: C.lime,
+                                            size: 54,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          onPressed: () => _skip(1),
+                                          icon: const Icon(
+                                            Icons.skip_next_rounded,
+                                            size: 27,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          onPressed: () =>
+                                              _toggleFavorite(track),
+                                          icon: Icon(
+                                            _favorites.contains(track.id)
+                                                ? Icons.favorite_rounded
+                                                : Icons.favorite_border_rounded,
+                                            color: _favorites.contains(track.id)
+                                                ? C.lime
+                                                : C.muted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 28),
+                              Container(width: 1, color: C.border),
+                              const SizedBox(width: 24),
+                              Expanded(
+                                flex: 4,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Expanded(
+                                          child: Text(
+                                            'Up next',
+                                            style: TextStyle(
+                                              fontFamily: 'SyneBold',
+                                              fontSize: 22,
+                                            ),
+                                          ),
+                                        ),
+                                        TextButton(
+                                          onPressed: () => setState(
+                                            () => _showUpNext = false,
+                                          ),
+                                          child: const Text('Show artwork'),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      'NOW PLAYING',
+                                      style: TextStyle(
+                                        color: C.muted,
+                                        fontSize: 9,
+                                        letterSpacing: 1.1,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Container(
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: C.surface,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              5,
+                                            ),
+                                            child: _artwork(
+                                              track.coverArt,
+                                              size: 42,
+                                              seed: track.album,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  track.title,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                    fontFamily: 'DMSansBold',
+                                                  ),
+                                                ),
+                                                Text(
+                                                  track.artist,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color: C.muted,
+                                                    fontSize: 10,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          const Icon(
+                                            Icons.graphic_eq_rounded,
+                                            color: C.lime,
+                                            size: 17,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 22),
+                                    const Text(
+                                      'NEXT IN QUEUE',
+                                      style: TextStyle(
+                                        color: C.muted,
+                                        fontSize: 9,
+                                        letterSpacing: 1.1,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Expanded(
+                                      child: ListView(
+                                        children: _queue
+                                            .skip(_queueIndex + 1)
+                                            .take(30)
+                                            .toList()
+                                            .asMap()
+                                            .entries
+                                            .map(
+                                              (entry) => _trackRow(
+                                                entry.value,
+                                                _queueIndex + entry.key + 1,
+                                              ),
+                                            )
+                                            .toList(),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
                       return SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(28, 20, 28, 16),
                         child: ConstrainedBox(
