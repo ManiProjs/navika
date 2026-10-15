@@ -1191,7 +1191,7 @@ class _HomeScreenState extends State<HomeScreen> {
               // but make the hidden layer transparent to taps.
               if (_current != null)
                 Positioned(
-                  top: isDesktop ? 54 : 64,
+                  top: _showPlayer ? 0 : (isDesktop ? 54 : 64),
                   left: 0,
                   right: 0,
                   bottom: 0,
@@ -1215,7 +1215,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               // Keep the custom app titlebar above the player overlay so it
               // remains visible and interactive while the player is open.
-              if (isDesktop || !_showSettings)
+              if (!_showPlayer && (isDesktop || !_showSettings))
                 Positioned(
                   top: 0,
                   left: 0,
@@ -3010,674 +3010,371 @@ class _HomeScreenState extends State<HomeScreen> {
         ? 0.0
         : (position / duration).clamp(0.0, 1.0);
 
+    final ambientColors = _playerAmbientColors(track);
     return Material(
       color: Colors.transparent,
-      child: AnimatedContainer(
-        duration: _reduceMotion
-            ? Duration.zero
-            : const Duration(milliseconds: 320),
-        color: C.bg,
-        child: SafeArea(
-          child: Column(
-            children: [
-              Container(
-                height: 70,
-                padding: const EdgeInsets.symmetric(horizontal: 22),
-                child: Row(
-                  children: [
-                    IconButton(
-                      tooltip: 'Back to library',
-                      onPressed: () => setState(() {
-                        _showPlayer = false;
-                        _showUpNext = false;
-                      }),
-                      icon: const Icon(Icons.chevron_left_rounded, size: 30),
-                    ),
-                    const Spacer(),
-                    const Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'NOW PLAYING',
-                          style: TextStyle(
-                            color: C.lime,
-                            fontFamily: 'DMSansBold',
-                            fontSize: 9,
-                            letterSpacing: 1.3,
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          'Your music',
-                          style: TextStyle(
-                            fontFamily: 'DMSansMedium',
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      tooltip: _showVisualizer
-                          ? 'Hide visualizer'
-                          : 'Show visualizer',
-                      onPressed: () =>
-                          setState(() => _showVisualizer = !_showVisualizer),
-                      icon: Icon(
-                        Icons.graphic_eq_rounded,
-                        color: _showVisualizer ? C.lime : C.muted,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: _reduceMotion ? Duration.zero : const Duration(seconds: 8),
+        builder: (context, phase, child) => AnimatedContainer(
+          duration: _reduceMotion
+              ? Duration.zero
+              : const Duration(milliseconds: 900),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment(-1 + phase * 2, -1),
+              end: Alignment(1 - phase * 2, 1),
+              colors: [
+                ambientColors.first,
+                Color.lerp(ambientColors.last, C.bg, .22)!,
+                C.bg,
+              ],
+              stops: const [0, .48, 1],
+            ),
+          ),
+          child: SafeArea(
+            child: Column(
+              children: [
+                Container(
+                  height: 70,
+                  padding: const EdgeInsets.symmetric(horizontal: 22),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Back to library',
+                        onPressed: () => setState(() {
+                          _showPlayer = false;
+                          _showUpNext = false;
+                        }),
+                        icon: const Icon(Icons.chevron_left_rounded, size: 30),
                       ),
-                    ),
-                    IconButton(
-                      onPressed: () => _showTrackMenu(track),
-                      icon: const Icon(Icons.more_horiz_rounded),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final artSize = (constraints.maxWidth * .34).clamp(
-                      112.0,
-                      210.0,
-                    );
-
-                    if (constraints.maxWidth > 680) {
-                      final desktopArtSize = (constraints.maxHeight * .48)
-                          .clamp(170.0, 310.0);
-                      if (_showUpNext) {
-                        return Padding(
-                          padding: const EdgeInsets.fromLTRB(28, 12, 28, 12),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Expanded(
-                                flex: 6,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'NOW PLAYING',
-                                      style: TextStyle(
-                                        color: C.muted,
-                                        fontSize: 9,
-                                        letterSpacing: 1.3,
-                                        fontFamily: 'DMSansBold',
-                                      ),
-                                    ),
-                                    const Spacer(),
-                                    Center(
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: _artwork(
-                                          track.coverArt,
-                                          size: desktopArtSize,
-                                          seed: track.album,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            track.title,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontFamily: 'SyneBold',
-                                              fontSize: 22,
-                                              height: 1.0,
-                                            ),
-                                          ),
-                                        ),
-                                        IconButton(
-                                          onPressed: () =>
-                                              _toggleFavorite(track),
-                                          icon: Icon(
-                                            _favorites.contains(track.id)
-                                                ? Icons.favorite_rounded
-                                                : Icons.favorite_border_rounded,
-                                            color: C.lime,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${track.artist} · ${track.album}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: C.muted,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    _seekBar(progress, duration),
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Text(
-                                          _formatTime(position),
-                                          style: const TextStyle(
-                                            color: C.muted,
-                                            fontSize: 10,
-                                          ),
-                                        ),
-                                        Text(
-                                          _formatTime(duration),
-                                          style: const TextStyle(
-                                            color: C.muted,
-                                            fontSize: 10,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 0),
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        IconButton(
-                                          onPressed: () => setState(
-                                            () => _shuffle = !_shuffle,
-                                          ),
-                                          icon: Icon(
-                                            Icons.shuffle_rounded,
-                                            color: _shuffle ? C.lime : C.muted,
-                                          ),
-                                        ),
-                                        IconButton(
-                                          onPressed: () => _skip(-1),
-                                          icon: const Icon(
-                                            Icons.skip_previous_rounded,
-                                            size: 27,
-                                          ),
-                                        ),
-                                        IconButton(
-                                          onPressed: _togglePlayback,
-                                          icon: Icon(
-                                            _player.playing
-                                                ? Icons
-                                                      .pause_circle_filled_rounded
-                                                : Icons
-                                                      .play_circle_fill_rounded,
-                                            color: C.lime,
-                                            size: 54,
-                                          ),
-                                        ),
-                                        IconButton(
-                                          onPressed: () => _skip(1),
-                                          icon: const Icon(
-                                            Icons.skip_next_rounded,
-                                            size: 27,
-                                          ),
-                                        ),
-                                        IconButton(
-                                          onPressed: () => setState(
-                                            () => _repeatAll = !_repeatAll,
-                                          ),
-                                          icon: Icon(
-                                            Icons.repeat_rounded,
-                                            color: _repeatAll
-                                                ? C.lime
-                                                : C.muted,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 28),
-                              Container(width: 1, color: C.border),
-                              const SizedBox(width: 24),
-                              Expanded(
-                                flex: 4,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        const Expanded(
-                                          child: Text(
-                                            'Up next',
-                                            style: TextStyle(
-                                              fontFamily: 'SyneBold',
-                                              fontSize: 22,
-                                            ),
-                                          ),
-                                        ),
-                                        TextButton(
-                                          onPressed: () => setState(() {
-                                            _queue
-                                              ..clear()
-                                              ..add(track);
-                                            _queueIndex = 0;
-                                          }),
-                                          child: const Text('Clear'),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    const Text(
-                                      'NOW PLAYING',
-                                      style: TextStyle(
-                                        color: C.muted,
-                                        fontSize: 9,
-                                        letterSpacing: 1.1,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Container(
-                                      padding: const EdgeInsets.all(10),
-                                      decoration: BoxDecoration(
-                                        color: C.surface,
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              5,
-                                            ),
-                                            child: _artwork(
-                                              track.coverArt,
-                                              size: 42,
-                                              seed: track.album,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  track.title,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                    fontSize: 12,
-                                                    fontFamily: 'DMSansBold',
-                                                  ),
-                                                ),
-                                                Text(
-                                                  track.artist,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                    color: C.muted,
-                                                    fontSize: 10,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          const Icon(
-                                            Icons.graphic_eq_rounded,
-                                            color: C.lime,
-                                            size: 17,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(height: 22),
-                                    const Text(
-                                      'NEXT IN QUEUE',
-                                      style: TextStyle(
-                                        color: C.muted,
-                                        fontSize: 9,
-                                        letterSpacing: 1.1,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Expanded(
-                                      child: ListView(
-                                        children: _queue
-                                            .skip(_queueIndex + 1)
-                                            .take(30)
-                                            .toList()
-                                            .asMap()
-                                            .entries
-                                            .map(
-                                              (entry) => _trackRow(
-                                                entry.value,
-                                                _queueIndex + entry.key + 1,
-                                              ),
-                                            )
-                                            .toList(),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                      return SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(28, 20, 28, 16),
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            minHeight: constraints.maxHeight - 36,
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: _artwork(
-                                  track.coverArt,
-                                  size: desktopArtSize,
-                                  seed: track.album,
-                                ),
-                              ),
-                              const SizedBox(width: 30),
-                              Expanded(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      track.title,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontFamily: 'SyneBold',
-                                        fontSize: 27,
-                                        letterSpacing: -.8,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 7),
-                                    Text(
-                                      track.artist,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: C.muted,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      track.album,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: C.muted,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                    if (_showVisualizer) ...[
-                                      const SizedBox(height: 12),
-                                      _visualizer(),
-                                    ],
-                                    Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: IconButton(
-                                        tooltip: 'Toggle favorite',
-                                        onPressed: () => _toggleFavorite(track),
-                                        icon: Icon(
-                                          _favorites.contains(track.id)
-                                              ? Icons.favorite_rounded
-                                              : Icons.favorite_border_rounded,
-                                          color: _favorites.contains(track.id)
-                                              ? C.lime
-                                              : C.muted,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    _seekBar(progress, duration),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Text(
-                                          _formatTime(position),
-                                          style: const TextStyle(
-                                            color: C.muted,
-                                            fontSize: 10,
-                                          ),
-                                        ),
-                                        Text(
-                                          _formatTime(duration),
-                                          style: const TextStyle(
-                                            color: C.muted,
-                                            fontSize: 10,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        IconButton(
-                                          tooltip: 'Shuffle',
-                                          visualDensity: VisualDensity.compact,
-                                          constraints: const BoxConstraints(
-                                            minWidth: 40,
-                                            minHeight: 40,
-                                          ),
-                                          onPressed: () => setState(
-                                            () => _shuffle = !_shuffle,
-                                          ),
-                                          icon: Icon(
-                                            Icons.shuffle_rounded,
-                                            color: _shuffle ? C.lime : C.muted,
-                                          ),
-                                        ),
-                                        IconButton(
-                                          tooltip: 'Previous track',
-                                          visualDensity: VisualDensity.compact,
-                                          constraints: const BoxConstraints(
-                                            minWidth: 40,
-                                            minHeight: 40,
-                                          ),
-                                          onPressed: () => _skip(-1),
-                                          icon: const Icon(
-                                            Icons.skip_previous_rounded,
-                                            size: 26,
-                                          ),
-                                        ),
-                                        InkWell(
-                                          borderRadius: BorderRadius.circular(
-                                            40,
-                                          ),
-                                          onTap: _togglePlayback,
-                                          child: Container(
-                                            width: 50,
-                                            height: 50,
-                                            decoration: const BoxDecoration(
-                                              color: C.lime,
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: Icon(
-                                              _player.playing
-                                                  ? Icons.pause_rounded
-                                                  : Icons.play_arrow_rounded,
-                                              color: C.black,
-                                              size: 25,
-                                            ),
-                                          ),
-                                        ),
-                                        IconButton(
-                                          tooltip: 'Next track',
-                                          visualDensity: VisualDensity.compact,
-                                          constraints: const BoxConstraints(
-                                            minWidth: 40,
-                                            minHeight: 40,
-                                          ),
-                                          onPressed: () => _skip(1),
-                                          icon: const Icon(
-                                            Icons.skip_next_rounded,
-                                            size: 26,
-                                          ),
-                                        ),
-                                        IconButton(
-                                          tooltip: 'Repeat mode',
-                                          visualDensity: VisualDensity.compact,
-                                          constraints: const BoxConstraints(
-                                            minWidth: 40,
-                                            minHeight: 40,
-                                          ),
-                                          onPressed: () {
-                                            setState(() {
-                                              if (!_repeatAll && !_repeatOne) {
-                                                _repeatAll = true;
-                                              } else if (_repeatAll) {
-                                                _repeatAll = false;
-                                                _repeatOne = true;
-                                              } else {
-                                                _repeatOne = false;
-                                              }
-                                            });
-                                            _player.setLoopMode(
-                                              _repeatOne
-                                                  ? LoopMode.one
-                                                  : LoopMode.off,
-                                            );
-                                          },
-                                          icon: Icon(
-                                            Icons.repeat_rounded,
-                                            color: (_repeatAll || _repeatOne)
-                                                ? C.lime
-                                                : C.muted,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: OutlinedButton.icon(
-                                        onPressed: () =>
-                                            setState(() => _showUpNext = true),
-                                        icon: const Icon(
-                                          Icons.queue_music_rounded,
-                                        ),
-                                        label: Text(
-                                          'Up Next · ${_queue.length - _queueIndex - 1}',
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }
-
-                    return SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(22, 16, 22, 10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      const Spacer(),
+                      const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          if (_showUpNext) ...[
-                            _sectionTitle(
-                              'Up next',
-                              action: 'Show artwork',
-                              onAction: () =>
-                                  setState(() => _showUpNext = false),
+                          Text(
+                            'NOW PLAYING',
+                            style: TextStyle(
+                              color: C.lime,
+                              fontFamily: 'DMSansBold',
+                              fontSize: 9,
+                              letterSpacing: 1.3,
                             ),
-                            ..._queue
-                                .skip(_queueIndex + 1)
-                                .take(20)
-                                .toList()
-                                .asMap()
-                                .entries
-                                .map(
-                                  (entry) => _trackRow(
-                                    entry.value,
-                                    _queueIndex + entry.key + 1,
-                                  ),
-                                ),
-                            if (_queueIndex >= _queue.length - 1)
-                              const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 14),
-                                child: Text(
-                                  "You're at the end of the queue.",
-                                  style: TextStyle(
-                                    color: C.muted,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                          ] else ...[
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Your music',
+                            style: TextStyle(
+                              fontFamily: 'DMSansMedium',
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: _showVisualizer
+                            ? 'Hide visualizer'
+                            : 'Show visualizer',
+                        onPressed: () =>
+                            setState(() => _showVisualizer = !_showVisualizer),
+                        icon: Icon(
+                          Icons.graphic_eq_rounded,
+                          color: _showVisualizer ? C.lime : C.muted,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => _showTrackMenu(track),
+                        icon: const Icon(Icons.more_horiz_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final artSize = (constraints.maxWidth * .34).clamp(
+                        112.0,
+                        210.0,
+                      );
+
+                      if (constraints.maxWidth > 680) {
+                        final desktopArtSize = (constraints.maxHeight * .48)
+                            .clamp(170.0, 310.0);
+                        if (_showUpNext) {
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(28, 12, 28, 12),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(10),
-                                  child: _artwork(
-                                    track.coverArt,
-                                    size: artSize,
-                                    seed: track.album,
-                                  ),
-                                ),
-                                const SizedBox(width: 18),
                                 Expanded(
+                                  flex: 6,
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        track.title,
-                                        maxLines: 3,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontFamily: 'SyneBold',
-                                          fontSize: 23,
-                                          letterSpacing: -.7,
+                                      const Text(
+                                        'NOW PLAYING',
+                                        style: TextStyle(
+                                          color: C.muted,
+                                          fontSize: 9,
+                                          letterSpacing: 1.3,
+                                          fontFamily: 'DMSansBold',
                                         ),
                                       ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        track.artist,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: C.muted,
-                                          fontSize: 13,
+                                      const Spacer(),
+                                      Center(
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          child: _artwork(
+                                            track.coverArt,
+                                            size: desktopArtSize,
+                                            seed: track.album,
+                                          ),
                                         ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              track.title,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontFamily: 'SyneBold',
+                                                fontSize: 22,
+                                                height: 1.0,
+                                              ),
+                                            ),
+                                          ),
+                                          IconButton(
+                                            onPressed: () =>
+                                                _toggleFavorite(track),
+                                            icon: Icon(
+                                              _favorites.contains(track.id)
+                                                  ? Icons.favorite_rounded
+                                                  : Icons
+                                                        .favorite_border_rounded,
+                                              color: C.lime,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        track.album,
-                                        maxLines: 2,
+                                        '${track.artist} · ${track.album}',
+                                        maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
                                           color: C.muted,
-                                          fontSize: 11,
+                                          fontSize: 12,
                                         ),
                                       ),
-                                      if (_showVisualizer) ...[
-                                        const SizedBox(height: 8),
-                                        _visualizer(),
-                                      ],
+                                      const SizedBox(height: 8),
+                                      _seekBar(progress, duration),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            _formatTime(position),
+                                            style: const TextStyle(
+                                              color: C.muted,
+                                              fontSize: 10,
+                                            ),
+                                          ),
+                                          Text(
+                                            _formatTime(duration),
+                                            style: const TextStyle(
+                                              color: C.muted,
+                                              fontSize: 10,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 0),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          IconButton(
+                                            onPressed: () => setState(
+                                              () => _shuffle = !_shuffle,
+                                            ),
+                                            icon: Icon(
+                                              Icons.shuffle_rounded,
+                                              color: _shuffle
+                                                  ? C.lime
+                                                  : C.muted,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            onPressed: () => _skip(-1),
+                                            icon: const Icon(
+                                              Icons.skip_previous_rounded,
+                                              size: 27,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            onPressed: _togglePlayback,
+                                            icon: Icon(
+                                              _player.playing
+                                                  ? Icons
+                                                        .pause_circle_filled_rounded
+                                                  : Icons
+                                                        .play_circle_fill_rounded,
+                                              color: C.lime,
+                                              size: 54,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            onPressed: () => _skip(1),
+                                            icon: const Icon(
+                                              Icons.skip_next_rounded,
+                                              size: 27,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            onPressed: () => setState(
+                                              () => _repeatAll = !_repeatAll,
+                                            ),
+                                            icon: Icon(
+                                              Icons.repeat_rounded,
+                                              color: _repeatAll
+                                                  ? C.lime
+                                                  : C.muted,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 28),
+                                Container(width: 1, color: C.border),
+                                const SizedBox(width: 24),
+                                Expanded(
+                                  flex: 4,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          const Expanded(
+                                            child: Text(
+                                              'Up next',
+                                              style: TextStyle(
+                                                fontFamily: 'SyneBold',
+                                                fontSize: 22,
+                                              ),
+                                            ),
+                                          ),
+                                          TextButton(
+                                            onPressed: () => setState(() {
+                                              _queue
+                                                ..clear()
+                                                ..add(track);
+                                              _queueIndex = 0;
+                                            }),
+                                            child: const Text('Clear'),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      const Text(
+                                        'NOW PLAYING',
+                                        style: TextStyle(
+                                          color: C.muted,
+                                          fontSize: 9,
+                                          letterSpacing: 1.1,
+                                        ),
+                                      ),
                                       const SizedBox(height: 10),
-                                      IconButton(
-                                        alignment: Alignment.centerLeft,
-                                        padding: EdgeInsets.zero,
-                                        onPressed: () => _toggleFavorite(track),
-                                        icon: Icon(
-                                          _favorites.contains(track.id)
-                                              ? Icons.favorite_rounded
-                                              : Icons.favorite_border_rounded,
-                                          color: _favorites.contains(track.id)
-                                              ? C.lime
-                                              : C.muted,
-                                          size: 24,
+                                      Container(
+                                        padding: const EdgeInsets.all(10),
+                                        decoration: BoxDecoration(
+                                          color: C.surface,
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            ClipRRect(
+                                              borderRadius:
+                                                  BorderRadius.circular(5),
+                                              child: _artwork(
+                                                track.coverArt,
+                                                size: 42,
+                                                seed: track.album,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    track.title,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: const TextStyle(
+                                                      fontSize: 12,
+                                                      fontFamily: 'DMSansBold',
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    track.artist,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: const TextStyle(
+                                                      color: C.muted,
+                                                      fontSize: 10,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            const Icon(
+                                              Icons.graphic_eq_rounded,
+                                              color: C.lime,
+                                              size: 17,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(height: 22),
+                                      const Text(
+                                        'NEXT IN QUEUE',
+                                        style: TextStyle(
+                                          color: C.muted,
+                                          fontSize: 9,
+                                          letterSpacing: 1.1,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Expanded(
+                                        child: ListView(
+                                          children: _queue
+                                              .skip(_queueIndex + 1)
+                                              .take(30)
+                                              .toList()
+                                              .asMap()
+                                              .entries
+                                              .map(
+                                                (entry) => _trackRow(
+                                                  entry.value,
+                                                  _queueIndex + entry.key + 1,
+                                                ),
+                                              )
+                                              .toList(),
                                         ),
                                       ),
                                     ],
@@ -3685,150 +3382,504 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ],
                             ),
-                          ],
-                          const SizedBox(height: 20),
-                          _seekBar(progress, duration),
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                _formatTime(position),
-                                style: const TextStyle(
-                                  color: C.muted,
-                                  fontSize: 10,
-                                ),
-                              ),
-                              Text(
-                                _formatTime(duration),
-                                style: const TextStyle(
-                                  color: C.muted,
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 18),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              IconButton(
-                                visualDensity: VisualDensity.compact,
-                                constraints: const BoxConstraints(
-                                  minWidth: 40,
-                                  minHeight: 40,
-                                ),
-                                onPressed: () =>
-                                    setState(() => _shuffle = !_shuffle),
-                                icon: Icon(
-                                  Icons.shuffle_rounded,
-                                  color: _shuffle ? C.lime : C.muted,
-                                  size: 21,
-                                ),
-                              ),
-                              IconButton(
-                                visualDensity: VisualDensity.compact,
-                                constraints: const BoxConstraints(
-                                  minWidth: 40,
-                                  minHeight: 40,
-                                ),
-                                onPressed: () => _skip(-1),
-                                icon: const Icon(
-                                  Icons.skip_previous_rounded,
-                                  size: 27,
-                                ),
-                              ),
-                              InkWell(
-                                borderRadius: BorderRadius.circular(40),
-                                onTap: _togglePlayback,
-                                child: Container(
-                                  width: 52,
-                                  height: 52,
-                                  decoration: const BoxDecoration(
-                                    color: C.lime,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Icon(
-                                    _player.playing
-                                        ? Icons.pause_rounded
-                                        : Icons.play_arrow_rounded,
-                                    color: C.black,
-                                    size: 26,
+                          );
+                        }
+                        return SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(28, 20, 28, 16),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              minHeight: constraints.maxHeight - 36,
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: _artwork(
+                                    track.coverArt,
+                                    size: desktopArtSize,
+                                    seed: track.album,
                                   ),
                                 ),
-                              ),
-                              IconButton(
-                                visualDensity: VisualDensity.compact,
-                                constraints: const BoxConstraints(
-                                  minWidth: 40,
-                                  minHeight: 40,
+                                const SizedBox(width: 30),
+                                Expanded(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        track.title,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontFamily: 'SyneBold',
+                                          fontSize: 27,
+                                          letterSpacing: -.8,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 7),
+                                      Text(
+                                        track.artist,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: C.muted,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        track.album,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: C.muted,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                      if (_showVisualizer) ...[
+                                        const SizedBox(height: 12),
+                                        _visualizer(),
+                                      ],
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: IconButton(
+                                          tooltip: 'Toggle favorite',
+                                          onPressed: () =>
+                                              _toggleFavorite(track),
+                                          icon: Icon(
+                                            _favorites.contains(track.id)
+                                                ? Icons.favorite_rounded
+                                                : Icons.favorite_border_rounded,
+                                            color: _favorites.contains(track.id)
+                                                ? C.lime
+                                                : C.muted,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      _seekBar(progress, duration),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            _formatTime(position),
+                                            style: const TextStyle(
+                                              color: C.muted,
+                                              fontSize: 10,
+                                            ),
+                                          ),
+                                          Text(
+                                            _formatTime(duration),
+                                            style: const TextStyle(
+                                              color: C.muted,
+                                              fontSize: 10,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          IconButton(
+                                            tooltip: 'Shuffle',
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 40,
+                                              minHeight: 40,
+                                            ),
+                                            onPressed: () => setState(
+                                              () => _shuffle = !_shuffle,
+                                            ),
+                                            icon: Icon(
+                                              Icons.shuffle_rounded,
+                                              color: _shuffle
+                                                  ? C.lime
+                                                  : C.muted,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Previous track',
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 40,
+                                              minHeight: 40,
+                                            ),
+                                            onPressed: () => _skip(-1),
+                                            icon: const Icon(
+                                              Icons.skip_previous_rounded,
+                                              size: 26,
+                                            ),
+                                          ),
+                                          InkWell(
+                                            borderRadius: BorderRadius.circular(
+                                              40,
+                                            ),
+                                            onTap: _togglePlayback,
+                                            child: Container(
+                                              width: 50,
+                                              height: 50,
+                                              decoration: const BoxDecoration(
+                                                color: C.lime,
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Icon(
+                                                _player.playing
+                                                    ? Icons.pause_rounded
+                                                    : Icons.play_arrow_rounded,
+                                                color: C.black,
+                                                size: 25,
+                                              ),
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Next track',
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 40,
+                                              minHeight: 40,
+                                            ),
+                                            onPressed: () => _skip(1),
+                                            icon: const Icon(
+                                              Icons.skip_next_rounded,
+                                              size: 26,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Repeat mode',
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 40,
+                                              minHeight: 40,
+                                            ),
+                                            onPressed: () {
+                                              setState(() {
+                                                if (!_repeatAll &&
+                                                    !_repeatOne) {
+                                                  _repeatAll = true;
+                                                } else if (_repeatAll) {
+                                                  _repeatAll = false;
+                                                  _repeatOne = true;
+                                                } else {
+                                                  _repeatOne = false;
+                                                }
+                                              });
+                                              _player.setLoopMode(
+                                                _repeatOne
+                                                    ? LoopMode.one
+                                                    : LoopMode.off,
+                                              );
+                                            },
+                                            icon: Icon(
+                                              Icons.repeat_rounded,
+                                              color: (_repeatAll || _repeatOne)
+                                                  ? C.lime
+                                                  : C.muted,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: OutlinedButton.icon(
+                                          onPressed: () => setState(
+                                            () => _showUpNext = true,
+                                          ),
+                                          icon: const Icon(
+                                            Icons.queue_music_rounded,
+                                          ),
+                                          label: Text(
+                                            'Up Next · ${_queue.length - _queueIndex - 1}',
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                onPressed: () => _skip(1),
-                                icon: const Icon(
-                                  Icons.skip_next_rounded,
-                                  size: 27,
-                                ),
-                              ),
-                              IconButton(
-                                visualDensity: VisualDensity.compact,
-                                constraints: const BoxConstraints(
-                                  minWidth: 40,
-                                  minHeight: 40,
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    if (!_repeatAll && !_repeatOne) {
-                                      _repeatAll = true;
-                                    } else if (_repeatAll) {
-                                      _repeatAll = false;
-                                      _repeatOne = true;
-                                    } else {
-                                      _repeatOne = false;
-                                    }
-                                  });
-                                  _player.setLoopMode(
-                                    _repeatOne ? LoopMode.one : LoopMode.off,
-                                  );
-                                },
-                                icon: Icon(
-                                  Icons.repeat_rounded,
-                                  color: (_repeatAll || _repeatOne)
-                                      ? C.lime
-                                      : C.muted,
-                                  size: 21,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: OutlinedButton.icon(
-                              onPressed: () =>
-                                  setState(() => _showUpNext = !_showUpNext),
-                              icon: Icon(
-                                _showUpNext
-                                    ? Icons.album_rounded
-                                    : Icons.queue_music_rounded,
-                              ),
-                              label: Text(
-                                _showUpNext
-                                    ? 'Back to artwork'
-                                    : 'Up Next · ${_queue.length - _queueIndex - 1}',
-                              ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    );
-                  },
+                        );
+                      }
+
+                      return SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(22, 16, 22, 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (_showUpNext) ...[
+                              _sectionTitle(
+                                'Up next',
+                                action: 'Show artwork',
+                                onAction: () =>
+                                    setState(() => _showUpNext = false),
+                              ),
+                              ..._queue
+                                  .skip(_queueIndex + 1)
+                                  .take(20)
+                                  .toList()
+                                  .asMap()
+                                  .entries
+                                  .map(
+                                    (entry) => _trackRow(
+                                      entry.value,
+                                      _queueIndex + entry.key + 1,
+                                    ),
+                                  ),
+                              if (_queueIndex >= _queue.length - 1)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 14),
+                                  child: Text(
+                                    "You're at the end of the queue.",
+                                    style: TextStyle(
+                                      color: C.muted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                            ] else ...[
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: _artwork(
+                                      track.coverArt,
+                                      size: artSize,
+                                      seed: track.album,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 18),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        Text(
+                                          track.title,
+                                          maxLines: 3,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                            fontFamily: 'SyneBold',
+                                            fontSize: 21,
+                                            letterSpacing: -.7,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          track.artist,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                            color: C.muted,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          track.album,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                            color: C.muted,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                        if (_showVisualizer) ...[
+                                          const SizedBox(height: 8),
+                                          _visualizer(),
+                                        ],
+                                        const SizedBox(height: 10),
+                                        IconButton(
+                                          alignment: Alignment.center,
+                                          padding: EdgeInsets.zero,
+                                          onPressed: () =>
+                                              _toggleFavorite(track),
+                                          icon: Icon(
+                                            _favorites.contains(track.id)
+                                                ? Icons.favorite_rounded
+                                                : Icons.favorite_border_rounded,
+                                            color: _favorites.contains(track.id)
+                                                ? C.lime
+                                                : C.muted,
+                                            size: 24,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                            const SizedBox(height: 20),
+                            _seekBar(progress, duration),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  _formatTime(position),
+                                  style: const TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                Text(
+                                  _formatTime(duration),
+                                  style: const TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 40,
+                                    minHeight: 40,
+                                  ),
+                                  onPressed: () =>
+                                      setState(() => _shuffle = !_shuffle),
+                                  icon: Icon(
+                                    Icons.shuffle_rounded,
+                                    color: _shuffle ? C.lime : C.muted,
+                                    size: 21,
+                                  ),
+                                ),
+                                IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 40,
+                                    minHeight: 40,
+                                  ),
+                                  onPressed: () => _skip(-1),
+                                  icon: const Icon(
+                                    Icons.skip_previous_rounded,
+                                    size: 27,
+                                  ),
+                                ),
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(40),
+                                  onTap: _togglePlayback,
+                                  child: Container(
+                                    width: 52,
+                                    height: 52,
+                                    decoration: const BoxDecoration(
+                                      color: C.lime,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      _player.playing
+                                          ? Icons.pause_rounded
+                                          : Icons.play_arrow_rounded,
+                                      color: C.black,
+                                      size: 26,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 40,
+                                    minHeight: 40,
+                                  ),
+                                  onPressed: () => _skip(1),
+                                  icon: const Icon(
+                                    Icons.skip_next_rounded,
+                                    size: 27,
+                                  ),
+                                ),
+                                IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 40,
+                                    minHeight: 40,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      if (!_repeatAll && !_repeatOne) {
+                                        _repeatAll = true;
+                                      } else if (_repeatAll) {
+                                        _repeatAll = false;
+                                        _repeatOne = true;
+                                      } else {
+                                        _repeatOne = false;
+                                      }
+                                    });
+                                    _player.setLoopMode(
+                                      _repeatOne ? LoopMode.one : LoopMode.off,
+                                    );
+                                  },
+                                  icon: Icon(
+                                    Icons.repeat_rounded,
+                                    color: (_repeatAll || _repeatOne)
+                                        ? C.lime
+                                        : C.muted,
+                                    size: 21,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: OutlinedButton.icon(
+                                onPressed: () =>
+                                    setState(() => _showUpNext = !_showUpNext),
+                                icon: Icon(
+                                  _showUpNext
+                                      ? Icons.album_rounded
+                                      : Icons.queue_music_rounded,
+                                ),
+                                label: Text(
+                                  _showUpNext
+                                      ? 'Back to artwork'
+                                      : 'Up Next · ${_queue.length - _queueIndex - 1}',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  List<Color> _playerAmbientColors(MusicTrack track) {
+    const palettes = <List<Color>>[
+      [Color(0xFF7B4A35), Color(0xFF38231D)],
+      [Color(0xFF3F685B), Color(0xFF1D302B)],
+      [Color(0xFF685B86), Color(0xFF29233A)],
+      [Color(0xFF8A6B35), Color(0xFF392D1C)],
+      [Color(0xFF8B4651), Color(0xFF3C2229)],
+      [Color(0xFF426A91), Color(0xFF1D2B3A)],
+    ];
+    return palettes[track.album.hashCode.abs() % palettes.length];
   }
 
   Widget _trackRow(MusicTrack track, int index) {
