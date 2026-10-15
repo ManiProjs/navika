@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -66,6 +67,7 @@ const _queueKey = 'navika.playback.queue';
 const _recommendationFeedbackKey = 'navika.recommendations.dismissed';
 const _speedKey = 'navika.playback.speed';
 const _localTracksKey = 'navika.local.tracks';
+const _localFoldersKey = 'navika.local.folders';
 
 enum AppTab { home, search, library, playlists, favorites, stats }
 
@@ -484,6 +486,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _password = TextEditingController();
   Timer? _searchTimer;
   Timer? _sleepTimer;
+  Timer? _folderScanTimer;
   int _searchRequestId = 0;
   final Set<String> _dismissedRecommendations = {};
   double _playbackSpeed = 1.0;
@@ -494,6 +497,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<MusicTrack> _tracks = [];
   List<MusicTrack> _localTracks = [];
+  List<String> _localFolders = [];
   List<MusicTrack> _searchResults = [];
   List<MusicTrack> _queue = [];
   List<ListeningEvent> _history = [];
@@ -520,6 +524,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _repeatOne = false;
   bool _handlingCompletion = false;
   bool _seeking = false;
+  bool _scanningLocalFolders = false;
 
   String _error = '';
   String _libraryError = '';
@@ -783,6 +788,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _repeatAll = preferences.getBool(_repeatAllKey) ?? false;
     _repeatOne = preferences.getBool(_repeatOneKey) ?? false;
     _playbackSpeed = preferences.getDouble(_speedKey) ?? 1.0;
+    _localFolders = preferences.getStringList(_localFoldersKey) ?? [];
     final savedLocalTracks = preferences.getString(_localTracksKey);
     if (savedLocalTracks != null) {
       try {
@@ -801,6 +807,16 @@ class _HomeScreenState extends State<HomeScreen> {
       } catch (_) {
         await preferences.remove(_localTracksKey);
       }
+    }
+    if (_localFolders.isNotEmpty) {
+      // Refresh watched folders before showing the library. The picker grants
+      // access to user-selected locations; if a location is no longer
+      // accessible, the scan preserves its previously indexed tracks.
+      unawaited(_scanLocalFolders());
+      _folderScanTimer ??= Timer.periodic(
+        Duration(seconds: 20),
+        (_) => unawaited(_scanLocalFolders()),
+      );
     }
     _dismissedRecommendations.addAll(
       preferences.getStringList(_recommendationFeedbackKey) ?? const [],
@@ -1057,6 +1073,124 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not import music: $error')),
       );
+    }
+  }
+
+  Future<void> _importLocalFolder() async {
+    try {
+      final folder = await FilePicker.getDirectoryPath(
+        dialogTitle: 'Choose a folder containing music',
+      );
+      if (folder == null || folder.isEmpty || !mounted) return;
+
+      final normalized = folder.replaceFirst(RegExp(r'[/\\]+$'), '');
+      final folders = {..._localFolders, normalized}.toList();
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setStringList(_localFoldersKey, folders);
+      if (!mounted) return;
+      setState(() => _localFolders = folders);
+      _folderScanTimer ??= Timer.periodic(
+        Duration(seconds: 20),
+        (_) => unawaited(_scanLocalFolders()),
+      );
+      await _scanLocalFolders(showFeedback: true);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not add music folder: $error')),
+      );
+    }
+  }
+
+  bool _isAudioFile(String path) => RegExp(
+    r'\.(mp3|m4a|aac|wav|flac|ogg|oga|opus|aiff|aif|ape|wv|mp4|3gp)$',
+    caseSensitive: false,
+  ).hasMatch(path);
+
+  Future<void> _scanLocalFolders({bool showFeedback = false}) async {
+    if (_scanningLocalFolders || _localFolders.isEmpty) return;
+    _scanningLocalFolders = true;
+    try {
+      final discovered = <String, MusicTrack>{};
+      final inaccessibleFolders = <String>[];
+      for (final folder in _localFolders) {
+        try {
+          final directory = Directory(folder);
+          if (!await directory.exists()) {
+            inaccessibleFolders.add(folder);
+            continue;
+          }
+          await for (final entity in directory.list(
+            recursive: true,
+            followLinks: false,
+          )) {
+            if (entity is! File || !_isAudioFile(entity.path)) continue;
+            final path = entity.path;
+            final fileName = path.split(RegExp(r'[/\\]')).last;
+            final dot = fileName.lastIndexOf('.');
+            final title = (dot > 0 ? fileName.substring(0, dot) : fileName)
+                .replaceAll(RegExp(r'_+'), ' ')
+                .trim();
+            discovered['local:$path'] = MusicTrack(
+              id: 'local:$path',
+              title: title.isEmpty ? fileName : title,
+              artist: 'Local file',
+              album: 'On this device',
+              localPath: path,
+            );
+          }
+        } catch (_) {
+          inaccessibleFolders.add(folder);
+        }
+      }
+
+      // Keep manually imported tracks and tracks in folders whose access was
+      // temporarily denied; remove files that disappeared from readable folders.
+      final retained = _localTracks.where((track) {
+        final path = track.localPath;
+        if (path == null) return false;
+        final parentFolder = _localFolders.where(
+          (folder) => path.startsWith('$folder/'),
+        );
+        if (parentFolder.isEmpty) return true;
+        if (inaccessibleFolders.any((folder) => path.startsWith('$folder/'))) {
+          return true;
+        }
+        return false;
+      });
+      final merged = <String, MusicTrack>{
+        for (final track in retained) track.id: track,
+        for (final track in discovered.values) track.id: track,
+      };
+      final updated = merged.values.toList()
+        ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      final changed = updated.length != _localTracks.length ||
+          !updated.every((track) => _localTracks.any((old) => old.id == track.id));
+      if (changed) {
+        final preferences = await SharedPreferences.getInstance();
+        await preferences.setString(
+          _localTracksKey,
+          jsonEncode(updated.map((track) => track.toJson()).toList()),
+        );
+        if (mounted) {
+          setState(() {
+            _localTracks = updated;
+            _tracks = [..._tracks.where((track) => !track.isLocal), ...updated];
+            _libraryLoaded = _connected ? _libraryLoaded : updated.isNotEmpty;
+          });
+        }
+      }
+      if (showFeedback && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Folder added. Found ${discovered.length} audio file(s); checking for changes every 20 seconds.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      _scanningLocalFolders = false;
     }
   }
 
@@ -1996,7 +2130,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _homePage() {
-    if (!_connected) {
+    if (!_connected && _localTracks.isEmpty) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2627,6 +2761,11 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: _importLocalMusic,
               icon: Icon(Icons.library_add_rounded, color: C.lime),
             ),
+            IconButton(
+              tooltip: 'Add a music folder',
+              onPressed: _importLocalFolder,
+              icon: Icon(Icons.create_new_folder_outlined, color: C.lime),
+            ),
             if (_connected)
               IconButton(
                 onPressed: _logout,
@@ -2743,9 +2882,17 @@ class _HomeScreenState extends State<HomeScreen> {
           SizedBox(height: 26),
           _sectionTitle(
             'On this device',
-            action: 'Add music',
-            onAction: _importLocalMusic,
+            action: 'Add folder',
+            onAction: _importLocalFolder,
           ),
+          if (_localFolders.isNotEmpty)
+            Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text(
+                '${_localFolders.length} watched folder(s) · refreshes automatically',
+                style: TextStyle(color: C.muted, fontSize: 11),
+              ),
+            ),
           SizedBox(height: 8),
           ..._localTracks.asMap().entries.map(
             (entry) => _trackRow(entry.value, entry.key),
