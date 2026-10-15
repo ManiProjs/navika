@@ -1577,87 +1577,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         const SizedBox(height: 14),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final columns = constraints.maxWidth >= 900
-                ? 4
-                : constraints.maxWidth >= 520
-                ? 2
-                : 1;
-            final cardWidth =
-                (constraints.maxWidth - (12 * (columns - 1))) / columns;
-            final picks = _recommended();
-            final recent = _history.reversed
-                .map((event) => _tracksById[event.id])
-                .whereType<MusicTrack>()
-                .firstOrNull;
-            return Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                _quickStartCard(
-                  width: cardWidth,
-                  title: 'Surprise me',
-                  subtitle: 'A fresh mix from your own collection.',
-                  icon: Icons.shuffle_rounded,
-                  artwork: _tracks.isEmpty ? null : _tracks.first.coverArt,
-                  seed: _tracks.isEmpty ? 'Your library' : _tracks.first.album,
-                  onTap: () {
-                    if (_tracks.isEmpty) {
-                      _selectTab(AppTab.library);
-                      return;
-                    }
-                    final tracks = List<MusicTrack>.from(_tracks)..shuffle();
-                    _play(tracks.first, playlist: tracks);
-                  },
-                ),
-                _quickStartCard(
-                  width: cardWidth,
-                  title: 'Picked for you',
-                  subtitle: 'A discovery mix from your library.',
-                  icon: Icons.auto_awesome_rounded,
-                  artwork: picks.isEmpty ? null : picks.first.coverArt,
-                  seed: picks.isEmpty ? 'Picked for you' : picks.first.album,
-                  onTap: () {
-                    if (picks.isEmpty) {
-                      _selectTab(AppTab.library);
-                    } else {
-                      _play(picks.first, playlist: picks);
-                    }
-                  },
-                ),
-                _quickStartCard(
-                  width: cardWidth,
-                  title: 'Your favorites',
-                  subtitle: 'The tracks you saved.',
-                  icon: Icons.favorite_rounded,
-                  artwork: _favoriteTracks.isEmpty
-                      ? null
-                      : _favoriteTracks.first.coverArt,
-                  seed: 'Your favorites',
-                  onTap: () => _selectTab(AppTab.favorites),
-                ),
-                _quickStartCard(
-                  width: cardWidth,
-                  title: 'Recently played',
-                  subtitle: recent?.title ?? 'Pick up where you left off.',
-                  icon: Icons.history_rounded,
-                  artwork: recent?.coverArt,
-                  seed: recent?.album ?? 'Recently played',
-                  onTap: () {
-                    if (recent != null) {
-                      _play(recent);
-                    } else {
-                      _selectTab(AppTab.library);
-                    }
-                  },
-                ),
-              ],
-            );
-          },
-        ),
         _sectionTitle(
-          'Made for you',
+          'Most played albums',
           action: 'See all',
           onAction: () => _selectTab(AppTab.library),
         ),
@@ -1771,50 +1692,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         const SizedBox(height: 28),
-        _sectionTitle('Your most played albums'),
-        if (!_libraryLoaded)
-          _card(
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.library_music_outlined,
-                  color: C.lime,
-                  size: 25,
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    'Open Library to load your collection and personalize these sections.',
-                    style: TextStyle(color: C.muted, fontSize: 12, height: 1.5),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Open Library',
-                  onPressed: () => _selectTab(AppTab.library),
-                  icon: const Icon(Icons.arrow_forward_rounded, color: C.lime),
-                ),
-              ],
-            ),
-          ),
-        if (_mostPlayedAlbums.isEmpty)
-          _emptyState(
-            'Your favorites will show up here',
-            'Play some music and your most-played albums will appear.',
-          )
-        else
-          Wrap(
-            spacing: 12,
-            runSpacing: 16,
-            children: _mostPlayedAlbums.map((album) {
-              return SizedBox(
-                width: ((MediaQuery.sizeOf(context).width - 56) / 2).clamp(
-                  120.0,
-                  220.0,
-                ),
-                child: _albumCard(album),
-              );
-            }).toList(),
-          ),
         const SizedBox(height: 12),
         _sectionTitle('Your artist rotation'),
         if (_mostPlayedArtists.isEmpty)
@@ -3206,8 +3083,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
 
                     if (constraints.maxWidth > 680) {
-                      final desktopArtSize = (constraints.maxHeight * .58)
-                          .clamp(180.0, 380.0);
+                      final desktopArtSize = (constraints.maxHeight * .66)
+                          .clamp(220.0, 440.0);
                       if (_showUpNext) {
                         return Padding(
                           padding: const EdgeInsets.fromLTRB(28, 18, 28, 20),
@@ -3240,14 +3117,31 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 20),
-                                    Text(
-                                      track.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontFamily: 'SyneBold',
-                                        fontSize: 25,
-                                      ),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            track.title,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontFamily: 'SyneBold',
+                                              fontSize: 25,
+                                              height: 1.05,
+                                            ),
+                                          ),
+                                        ),
+                                        IconButton(
+                                          onPressed: () =>
+                                              _toggleFavorite(track),
+                                          icon: Icon(
+                                            _favorites.contains(track.id)
+                                                ? Icons.favorite_rounded
+                                                : Icons.favorite_border_rounded,
+                                            color: C.lime,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
@@ -3322,13 +3216,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                         ),
                                         IconButton(
-                                          onPressed: () =>
-                                              _toggleFavorite(track),
+                                          onPressed: () => setState(
+                                            () => _repeatAll = !_repeatAll,
+                                          ),
                                           icon: Icon(
-                                            _favorites.contains(track.id)
-                                                ? Icons.favorite_rounded
-                                                : Icons.favorite_border_rounded,
-                                            color: _favorites.contains(track.id)
+                                            Icons.repeat_rounded,
+                                            color: _repeatAll
                                                 ? C.lime
                                                 : C.muted,
                                           ),
@@ -3358,10 +3251,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                         ),
                                         TextButton(
-                                          onPressed: () => setState(
-                                            () => _showUpNext = false,
-                                          ),
-                                          child: const Text('Show artwork'),
+                                          onPressed: () => setState(() {
+                                            _queue
+                                              ..clear()
+                                              ..add(track);
+                                            _queueIndex = 0;
+                                          }),
+                                          child: const Text('Clear'),
                                         ),
                                       ],
                                     ),
@@ -4004,75 +3900,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _albumCard(
-    ({String album, String artist, int count, MusicTrack track}) album,
-  ) {
-    return InkWell(
-      onTap: () => _play(album.track),
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: C.surface,
-          border: Border.all(color: C.border),
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(9),
-              child: AspectRatio(
-                aspectRatio: 1.35,
-                child: _artwork(
-                  album.track.coverArt,
-                  size: double.infinity,
-                  seed: album.album,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                album.album,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontFamily: 'DMSansBold',
-                  fontSize: 13,
-                  height: 1.2,
-                ),
-              ),
-            ),
-            const SizedBox(height: 3),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                album.artist,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: C.muted, fontSize: 10),
-              ),
-            ),
-            const SizedBox(height: 7),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-              decoration: BoxDecoration(
-                color: C.surface2,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                '${album.count} ${album.count == 1 ? 'play' : 'plays'}',
-                style: const TextStyle(color: C.lime, fontSize: 10),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _artwork(
     String? coverArt, {
     required double size,
@@ -4148,67 +3975,6 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(20),
       ),
       child: child,
-    );
-  }
-
-  Widget _quickStartCard({
-    required double width,
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required String? artwork,
-    required String seed,
-    required VoidCallback onTap,
-  }) {
-    return SizedBox(
-      width: width,
-      child: Material(
-        color: C.surface,
-        borderRadius: BorderRadius.circular(14),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: _artwork(artwork, size: 42, seed: seed),
-                    ),
-                    const Spacer(),
-                    Icon(icon, size: 17, color: C.lime),
-                  ],
-                ),
-                const SizedBox(height: 11),
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontFamily: 'DMSansBold',
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: C.muted,
-                    fontSize: 10,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 
