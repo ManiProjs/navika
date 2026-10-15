@@ -813,6 +813,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _error = restoreWarnings.join(' ');
       });
 
+      // Home recommendations and library stats depend on the track list.
+      // Load it during startup instead of waiting for the user to visit Library.
+      unawaited(_loadLibrary());
+
       if (mounted && restoreWarnings.isNotEmpty) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(restoreWarnings.join(' '))));
@@ -883,7 +887,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _busy = false;
         _password.clear();
       });
-      if (_tab == AppTab.library) unawaited(_loadLibrary());
+      // Home also depends on the library for its recommendations and stats.
+      unawaited(_loadLibrary());
     } catch (error) {
       if (!mounted) return;
       setState(() {
