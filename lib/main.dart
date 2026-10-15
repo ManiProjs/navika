@@ -21,20 +21,34 @@ Future<void> main() async {
       androidNotificationOngoing: true,
     );
   }
-  runApp(const NavikaApp());
+  runApp(NavikaApp());
 }
 
+enum NavikaTheme { dark, amoled, light }
+
+const _themeKey = 'navika.theme';
+final ValueNotifier<NavikaTheme> _themeMode = ValueNotifier(NavikaTheme.dark);
+
 abstract final class C {
-  // Palette sampled from the supplied music-player reference.
-  static const bg = Color(0xFF100F0D);
-  static const surface = Color(0xFF1B1916);
-  static const surface2 = Color(0xFF24211D);
-  static const border = Color(0xFF302D28);
-  static const text = Color(0xFFF5F3EC);
-  static const muted = Color(0xFFA29D91);
-  static const lime = Color(0xFFD6FF39);
-  static const black = Color(0xFF100F0D);
-  static const danger = Color(0xFFFF8585);
+  static bool get light => _themeMode.value == NavikaTheme.light;
+  static bool get amoled => _themeMode.value == NavikaTheme.amoled;
+  static Color get bg => light
+      ? Color(0xFFF6F6F3)
+      : (amoled ? Color(0xFF000000) : Color(0xFF100F0D));
+  static Color get surface => light
+      ? Color(0xFFFFFFFF)
+      : (amoled ? Color(0xFF090909) : Color(0xFF1B1916));
+  static Color get surface2 => light
+      ? Color(0xFFEBEBE6)
+      : (amoled ? Color(0xFF141414) : Color(0xFF24211D));
+  static Color get border => light
+      ? Color(0xFFD8D8D0)
+      : (amoled ? Color(0xFF242424) : Color(0xFF302D28));
+  static Color get text => light ? Color(0xFF171713) : Color(0xFFF5F3EC);
+  static Color get muted => light ? Color(0xFF68685F) : Color(0xFFA29D91);
+  static Color get lime => light ? Color(0xFF426600) : Color(0xFFD6FF39);
+  static Color get black => light ? const Color(0xFFFFFFFF) : bg;
+  static Color get danger => light ? Color(0xFFB42318) : Color(0xFFFF8585);
 }
 
 const _credentialsKey = 'navika.navidrome.credentials';
@@ -72,60 +86,112 @@ class NavikaApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const bodyStyle = TextStyle(fontFamily: 'DMSans', color: C.text);
-
-    return MaterialApp(
-      title: 'Navika',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: C.bg,
-        canvasColor: C.bg,
-        fontFamily: 'DMSans',
-        colorScheme: const ColorScheme.dark(
-          primary: C.lime,
-          onPrimary: C.black,
-          surface: C.surface,
-          onSurface: C.text,
-          outline: C.border,
-          error: C.danger,
+    return ValueListenableBuilder<NavikaTheme>(
+      valueListenable: _themeMode,
+      builder: (context, mode, _) => MaterialApp(
+        title: 'Navika',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          brightness: mode == NavikaTheme.light
+              ? Brightness.light
+              : Brightness.dark,
+          scaffoldBackgroundColor: C.bg,
+          canvasColor: C.bg,
+          fontFamily: 'DMSans',
+          colorScheme: ColorScheme(
+            brightness: mode == NavikaTheme.light
+                ? Brightness.light
+                : Brightness.dark,
+            primary: C.lime,
+            onPrimary: C.black,
+            surface: C.surface,
+            onSurface: C.text,
+            outline: C.border,
+            error: C.danger,
+            onError: Colors.white,
+            primaryContainer: C.surface2,
+            onPrimaryContainer: C.text,
+            secondary: C.lime,
+            onSecondary: C.black,
+            secondaryContainer: C.surface2,
+            onSecondaryContainer: C.text,
+            tertiary: C.lime,
+            onTertiary: C.black,
+            tertiaryContainer: C.surface2,
+            onTertiaryContainer: C.text,
+            errorContainer: C.danger,
+            onErrorContainer: Colors.white,
+            surfaceContainerHighest: C.surface2,
+            onSurfaceVariant: C.muted,
+            inverseSurface: C.text,
+            onInverseSurface: C.bg,
+            inversePrimary: C.lime,
+            shadow: Colors.black,
+            scrim: Colors.black,
+            surfaceTint: C.lime,
+          ),
+          textTheme: TextTheme(
+            bodyLarge: TextStyle(fontFamily: 'DMSans', color: C.text),
+            bodyMedium: TextStyle(fontFamily: 'DMSans', color: C.text),
+            bodySmall: TextStyle(fontFamily: 'DMSans', color: C.text),
+            titleLarge: TextStyle(fontFamily: 'SyneBold', color: C.text),
+            headlineMedium: TextStyle(fontFamily: 'SyneBold', color: C.text),
+          ),
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: C.bg,
+            hintStyle: TextStyle(
+              color: C.muted,
+              fontFamily: 'DMSans',
+              fontSize: 13,
+            ),
+            contentPadding: EdgeInsets.symmetric(horizontal: 13, vertical: 14),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: C.border),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: C.border),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: C.lime),
+            ),
+          ),
+          filledButtonTheme: FilledButtonThemeData(
+            style: FilledButton.styleFrom(
+              backgroundColor: C.lime,
+              foregroundColor: C.black,
+              padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(11),
+              ),
+              textStyle: const TextStyle(
+                fontFamily: 'DMSansBold',
+                fontSize: 12,
+              ),
+            ),
+          ),
+          outlinedButtonTheme: OutlinedButtonThemeData(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: C.text,
+              side: BorderSide(color: C.border),
+              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 13),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(11),
+              ),
+              textStyle: const TextStyle(
+                fontFamily: 'DMSansBold',
+                fontSize: 12,
+              ),
+            ),
+          ),
+          dividerColor: C.border,
+          useMaterial3: true,
         ),
-        textTheme: const TextTheme(
-          bodyLarge: bodyStyle,
-          bodyMedium: bodyStyle,
-          bodySmall: bodyStyle,
-          titleLarge: TextStyle(fontFamily: 'SyneBold', color: C.text),
-          headlineMedium: TextStyle(fontFamily: 'SyneBold', color: C.text),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: C.bg,
-          hintStyle: const TextStyle(
-            color: C.muted,
-            fontFamily: 'DMSans',
-            fontSize: 13,
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 13,
-            vertical: 14,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: C.border),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: C.border),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: C.lime),
-          ),
-        ),
-        dividerColor: C.border,
-        useMaterial3: true,
+        home: HomeScreen(),
       ),
-      home: const HomeScreen(),
     );
   }
 }
@@ -150,11 +216,11 @@ class _NewPlaylistDialogState extends State<_NewPlaylistDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: C.surface,
-      title: const Text('New playlist'),
+      title: Text('New playlist'),
       content: TextField(
         controller: _controller,
         autofocus: true,
-        decoration: const InputDecoration(hintText: 'Playlist name'),
+        decoration: InputDecoration(hintText: 'Playlist name'),
         onSubmitted: (value) {
           final name = value.trim();
           if (name.isNotEmpty) Navigator.pop(context, name);
@@ -163,14 +229,14 @@ class _NewPlaylistDialogState extends State<_NewPlaylistDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text('Cancel'),
         ),
         FilledButton(
           onPressed: () {
             final name = _controller.text.trim();
             if (name.isNotEmpty) Navigator.pop(context, name);
           },
-          child: const Text('Create'),
+          child: Text('Create'),
         ),
       ],
     );
@@ -223,10 +289,10 @@ class _PlaylistTrackPickerState extends State<_PlaylistTrackPicker> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 12),
               child: Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Choose tracks',
                       style: TextStyle(fontFamily: 'SyneBold', fontSize: 22),
@@ -234,19 +300,19 @@ class _PlaylistTrackPickerState extends State<_PlaylistTrackPicker> {
                   ),
                   Text(
                     '${_selected.length} selected',
-                    style: const TextStyle(color: C.lime, fontSize: 12),
+                    style: TextStyle(color: C.lime, fontSize: 12),
                   ),
                 ],
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: EdgeInsets.symmetric(horizontal: 20),
               child: TextField(
                 controller: _search,
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   hintText: 'Search title, artist, or album',
-                  prefixIcon: const Icon(Icons.search_rounded),
+                  prefixIcon: Icon(Icons.search_rounded),
                   suffixIcon: _search.text.isEmpty
                       ? null
                       : IconButton(
@@ -255,20 +321,20 @@ class _PlaylistTrackPickerState extends State<_PlaylistTrackPicker> {
                             _search.clear();
                             setState(() {});
                           },
-                          icon: const Icon(Icons.close_rounded),
+                          icon: Icon(Icons.close_rounded),
                         ),
                 ),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+              padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
               child: Row(
                 children: [
                   Text(
                     '${tracks.length} tracks',
-                    style: const TextStyle(color: C.muted, fontSize: 11),
+                    style: TextStyle(color: C.muted, fontSize: 11),
                   ),
-                  const Spacer(),
+                  Spacer(),
                   TextButton(
                     onPressed:
                         tracks
@@ -289,15 +355,15 @@ class _PlaylistTrackPickerState extends State<_PlaylistTrackPicker> {
                               }
                             });
                           },
-                    child: const Text('Select all results'),
+                    child: Text('Select all results'),
                   ),
                 ],
               ),
             ),
-            const Divider(height: 1),
+            Divider(height: 1),
             Expanded(
               child: tracks.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Text(
                         'No matching tracks',
                         style: TextStyle(color: C.muted),
@@ -327,7 +393,7 @@ class _PlaylistTrackPickerState extends State<_PlaylistTrackPicker> {
                             overflow: TextOverflow.ellipsis,
                           ),
                           trailing: alreadyAdded
-                              ? const Icon(
+                              ? Icon(
                                   Icons.check_circle_rounded,
                                   color: C.muted,
                                   size: 20,
@@ -355,18 +421,18 @@ class _PlaylistTrackPickerState extends State<_PlaylistTrackPicker> {
                       },
                     ),
             ),
-            const Divider(height: 1),
+            Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(16),
               child: Row(
                 children: [
                   Expanded(
                     child: OutlinedButton(
                       onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel'),
+                      child: Text('Cancel'),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  SizedBox(width: 10),
                   Expanded(
                     child: FilledButton.icon(
                       onPressed: _selected.isEmpty
@@ -379,7 +445,7 @@ class _PlaylistTrackPickerState extends State<_PlaylistTrackPicker> {
                                   )
                                   .toList(),
                             ),
-                      icon: const Icon(Icons.playlist_add_rounded),
+                      icon: Icon(Icons.playlist_add_rounded),
                       label: Text('Add ${_selected.length} tracks'),
                     ),
                   ),
@@ -441,6 +507,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _repeatAll = false;
   bool _repeatOne = false;
   bool _handlingCompletion = false;
+  bool _seeking = false;
 
   String _error = '';
   String _libraryError = '';
@@ -595,7 +662,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _searching = true;
       _searchError = '';
     });
-    _searchTimer = Timer(const Duration(milliseconds: 300), () async {
+    _searchTimer = Timer(Duration(milliseconds: 300), () async {
       try {
         final results = await _client!.searchTracks(query);
         if (!mounted || requestId != _searchRequestId) return;
@@ -666,6 +733,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final restoreWarnings = <String>[];
 
     _reduceMotion = preferences.getBool(_motionKey) ?? false;
+    final savedTheme = preferences.getString(_themeKey);
+    _themeMode.value = NavikaTheme.values.firstWhere(
+      (theme) => theme.name == savedTheme,
+      orElse: () => NavikaTheme.dark,
+    );
     _autoAdvance = preferences.getBool(_autoAdvanceKey) ?? true;
     _showVisualizer = preferences.getBool(_visualizerKey) ?? false;
 
@@ -880,7 +952,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await _player.setLoopMode(_repeatOne ? LoopMode.one : LoopMode.off);
       final started = _player.playerStateStream
           .firstWhere((state) => state.playing)
-          .timeout(const Duration(seconds: 15));
+          .timeout(Duration(seconds: 15));
       unawaited(
         _player.play().catchError((Object error) {
           if (mounted) {
@@ -1039,7 +1111,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _createPlaylist() async {
     final name = await showDialog<String>(
       context: context,
-      builder: (_) => const _NewPlaylistDialog(),
+      builder: (_) => _NewPlaylistDialog(),
     );
 
     if (name == null || name.trim().isEmpty) return;
@@ -1062,7 +1134,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: ListView(
           shrinkWrap: true,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.all(20),
               child: Text(
                 'Add to playlist',
@@ -1072,7 +1144,7 @@ class _HomeScreenState extends State<HomeScreen> {
             for (final playlist in _playlists.keys)
               ListTile(
                 title: Text(playlist),
-                leading: const Icon(Icons.queue_music_rounded),
+                leading: Icon(Icons.queue_music_rounded),
                 onTap: () => Navigator.pop(context, playlist),
               ),
           ],
@@ -1098,24 +1170,24 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Wrap(
           children: [
             ListTile(
-              leading: const Icon(Icons.favorite_border_rounded),
-              title: const Text('Toggle favorite'),
+              leading: Icon(Icons.favorite_border_rounded),
+              title: Text('Toggle favorite'),
               onTap: () {
                 Navigator.pop(context);
                 _toggleFavorite(track);
               },
             ),
             ListTile(
-              leading: const Icon(Icons.playlist_add_rounded),
-              title: const Text('Add to playlist'),
+              leading: Icon(Icons.playlist_add_rounded),
+              title: Text('Add to playlist'),
               onTap: () {
                 Navigator.pop(context);
                 _addToPlaylist(track);
               },
             ),
             ListTile(
-              leading: const Icon(Icons.play_arrow_rounded),
-              title: const Text('Play now'),
+              leading: Icon(Icons.play_arrow_rounded),
+              title: Text('Play now'),
               onTap: () {
                 Navigator.pop(context);
                 _play(track);
@@ -1151,7 +1223,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final isMacOS = platform == TargetPlatform.macOS;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: const SystemUiOverlayStyle(
+      value: SystemUiOverlayStyle(
         statusBarColor: C.bg,
         statusBarIconBrightness: Brightness.light,
         systemNavigationBarColor: C.bg,
@@ -1199,16 +1271,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: IgnorePointer(
                     ignoring: !_showPlayer,
                     child: AnimatedSlide(
-                      offset: _showPlayer ? Offset.zero : const Offset(0, 1),
+                      offset: _showPlayer ? Offset.zero : Offset(0, 1),
                       duration: _reduceMotion
                           ? Duration.zero
-                          : const Duration(milliseconds: 320),
+                          : Duration(milliseconds: 320),
                       curve: Curves.easeOutCubic,
                       child: AnimatedOpacity(
                         opacity: _showPlayer ? 1 : 0,
                         duration: _reduceMotion
                             ? Duration.zero
-                            : const Duration(milliseconds: 220),
+                            : Duration(milliseconds: 220),
                         child: _playerOverlay(),
                       ),
                     ),
@@ -1234,7 +1306,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       height: isDesktop ? 54 : 64,
       padding: EdgeInsets.fromLTRB(isMacOS ? 82 : 22, 0, 22, 0),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: C.border)),
       ),
       child: Row(
@@ -1251,15 +1323,15 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 _brandLine(12),
-                const SizedBox(width: 2),
+                SizedBox(width: 2),
                 _brandLine(15),
-                const SizedBox(width: 2),
+                SizedBox(width: 2),
                 _brandLine(9),
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          const Text(
+          SizedBox(width: 10),
+          Text(
             'navika',
             style: TextStyle(
               fontFamily: 'SyneBold',
@@ -1267,7 +1339,7 @@ class _HomeScreenState extends State<HomeScreen> {
               letterSpacing: -1,
             ),
           ),
-          const Spacer(),
+          Spacer(),
           Material(
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(20),
@@ -1278,10 +1350,7 @@ class _HomeScreenState extends State<HomeScreen> {
               splashColor: C.lime.withValues(alpha: .18),
               onTap: () => _selectTab(AppTab.library),
               child: Ink(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
-                ),
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
                   color: C.surface2,
                   borderRadius: BorderRadius.circular(20),
@@ -1297,10 +1366,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         shape: BoxShape.circle,
                       ),
                     ),
-                    const SizedBox(width: 7),
+                    SizedBox(width: 7),
                     Text(
                       _connected ? 'NAVIDROME' : 'CONNECT',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontFamily: 'DMSansBold',
                         fontSize: 10,
                         letterSpacing: .5,
@@ -1311,14 +1380,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: 10),
           if (_current != null) ...[
             _iconButton(
               Icons.graphic_eq_rounded,
               tooltip: 'Open player',
               onTap: () => setState(() => _showPlayer = true),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
           ],
           _iconButton(
             Icons.settings_outlined,
@@ -1344,14 +1413,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _desktopSidebar() {
     return Container(
       width: 252,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(right: BorderSide(color: C.border)),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 22, 16, 18),
+      padding: EdgeInsets.fromLTRB(16, 22, 16, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Padding(
+          Padding(
             padding: EdgeInsets.fromLTRB(14, 0, 14, 18),
             child: Text(
               'WORKSPACE',
@@ -1365,7 +1434,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           for (final tab in AppTab.values)
             Padding(
-              padding: const EdgeInsets.only(bottom: 6),
+              padding: EdgeInsets.only(bottom: 6),
               child: Material(
                 color: _tab == tab ? C.surface2 : Colors.transparent,
                 borderRadius: BorderRadius.circular(10),
@@ -1373,10 +1442,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   borderRadius: BorderRadius.circular(10),
                   onTap: () => _selectTab(tab),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 14,
-                    ),
+                    padding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                     child: Row(
                       children: [
                         Icon(
@@ -1384,7 +1450,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           size: 22,
                           color: _tab == tab ? C.lime : C.muted,
                         ),
-                        const SizedBox(width: 14),
+                        SizedBox(width: 14),
                         Text(
                           tab.label,
                           style: TextStyle(
@@ -1399,9 +1465,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-          const Spacer(),
+          Spacer(),
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: C.surface,
               border: Border.all(color: C.border),
@@ -1417,11 +1483,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     shape: BoxShape.circle,
                   ),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     _connected ? 'Server connected' : 'Not connected',
-                    style: const TextStyle(color: C.muted, fontSize: 10),
+                    style: TextStyle(color: C.muted, fontSize: 10),
                   ),
                 ),
               ],
@@ -1465,17 +1531,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _content() {
     if (_loading && !_connected) {
-      return const Center(child: CircularProgressIndicator(color: C.lime));
+      return Center(child: CircularProgressIndicator(color: C.lime));
     }
 
     return AnimatedSwitcher(
-      duration: _reduceMotion
-          ? Duration.zero
-          : const Duration(milliseconds: 220),
+      duration: _reduceMotion ? Duration.zero : Duration(milliseconds: 220),
       child: KeyedSubtree(
         key: ValueKey(_tab),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(22, 28, 22, 30),
+          padding: EdgeInsets.fromLTRB(22, 28, 22, 30),
           child: switch (_tab) {
             AppTab.home => _homePage(),
             AppTab.search => _searchPage(),
@@ -1494,7 +1558,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Your soundtrack\nstarts here.',
             style: TextStyle(
               fontFamily: 'SyneBold',
@@ -1503,28 +1567,28 @@ class _HomeScreenState extends State<HomeScreen> {
               letterSpacing: -2,
             ),
           ),
-          const SizedBox(height: 12),
-          const Text(
+          SizedBox(height: 12),
+          Text(
             'Connect your Navidrome server to get started.',
             style: TextStyle(color: C.muted, fontSize: 13, height: 1.6),
           ),
-          const SizedBox(height: 26),
+          SizedBox(height: 26),
           _card(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _artwork(null, size: 90, seed: 'Navika'),
-                const SizedBox(height: 18),
-                const Text(
+                SizedBox(height: 18),
+                Text(
                   'Your music lives here.',
                   style: TextStyle(fontFamily: 'SyneBold', fontSize: 21),
                 ),
-                const SizedBox(height: 8),
-                const Text(
+                SizedBox(height: 8),
+                Text(
                   'Connect Navidrome to explore your library.',
                   style: TextStyle(color: C.muted, fontSize: 13, height: 1.6),
                 ),
-                const SizedBox(height: 18),
+                SizedBox(height: 18),
                 _actionButton(
                   'Connect server ↗',
                   onTap: () => _selectTab(AppTab.library),
@@ -1550,17 +1614,17 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         Text(
           _greeting,
-          style: const TextStyle(
+          style: TextStyle(
             fontFamily: 'SyneBold',
             fontSize: 42,
             height: 1.12,
             letterSpacing: -2,
           ),
         ),
-        const SizedBox(height: 28),
+        SizedBox(height: 28),
         Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Text(
                 'Listen now',
                 style: TextStyle(
@@ -1577,7 +1641,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 14),
+        SizedBox(height: 14),
         _sectionTitle(
           'Most played albums',
           action: 'See all',
@@ -1589,7 +1653,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: math.min(8, _mostPlayedAlbums.length),
-              separatorBuilder: (_, _) => const SizedBox(width: 14),
+              separatorBuilder: (_, _) => SizedBox(width: 14),
               itemBuilder: (context, index) {
                 final album = _mostPlayedAlbums[index];
                 return SizedBox(
@@ -1604,22 +1668,22 @@ class _HomeScreenState extends State<HomeScreen> {
                           size: 148,
                           seed: album.album,
                         ),
-                        const SizedBox(height: 9),
+                        SizedBox(height: 9),
                         Text(
                           album.album,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontFamily: 'DMSansBold',
                             fontSize: 12,
                           ),
                         ),
-                        const SizedBox(height: 3),
+                        SizedBox(height: 3),
                         Text(
                           album.artist,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: C.muted, fontSize: 10),
+                          style: TextStyle(color: C.muted, fontSize: 10),
                         ),
                       ],
                     ),
@@ -1632,13 +1696,9 @@ class _HomeScreenState extends State<HomeScreen> {
           _card(
             child: Row(
               children: [
-                const Icon(
-                  Icons.library_music_outlined,
-                  color: C.lime,
-                  size: 25,
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
+                Icon(Icons.library_music_outlined, color: C.lime, size: 25),
+                SizedBox(width: 12),
+                Expanded(
                   child: Text(
                     'Open Library to load your collection and personalize these sections.',
                     style: TextStyle(color: C.muted, fontSize: 12, height: 1.5),
@@ -1647,21 +1707,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 IconButton(
                   tooltip: 'Open Library',
                   onPressed: () => _selectTab(AppTab.library),
-                  icon: const Icon(Icons.arrow_forward_rounded, color: C.lime),
+                  icon: Icon(Icons.arrow_forward_rounded, color: C.lime),
                 ),
               ],
             ),
           ),
         _sectionTitle('Recently played'),
         if (_history.isEmpty)
-          const Text(
+          Text(
             'Your recently played music will appear here.',
             style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
           )
         else
           ..._history.reversed.take(5).map((event) {
             final track = _tracksById[event.id];
-            if (track == null) return const SizedBox.shrink();
+            if (track == null) return SizedBox.shrink();
             return _trackRow(track, _history.indexOf(event));
           }),
         _sectionTitle(
@@ -1677,11 +1737,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 'TRACKS',
               ),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Expanded(
               child: _homeStat(_libraryLoaded ? '$_albumCount' : '—', 'ALBUMS'),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Expanded(
               child: _homeStat(
                 _libraryLoaded
@@ -1692,11 +1752,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 28),
-        const SizedBox(height: 12),
+        SizedBox(height: 28),
+        SizedBox(height: 12),
         _sectionTitle('Your artist rotation'),
         if (_mostPlayedArtists.isEmpty)
-          const Text(
+          Text(
             'Your regular artists will appear after you listen for a while.',
             style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
           )
@@ -1713,18 +1773,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   )
                   .toList();
               return ActionChip(
-                avatar: const Icon(Icons.graphic_eq_rounded, size: 16),
+                avatar: Icon(Icons.graphic_eq_rounded, size: 16),
                 label: Text('${artist.artist} · ${artist.count} plays'),
                 onPressed: artistTracks.isEmpty
                     ? null
                     : () => _play(artist.track, playlist: artistTracks),
                 backgroundColor: C.surface,
-                side: const BorderSide(color: C.border),
-                labelStyle: const TextStyle(color: C.text, fontSize: 11),
+                side: BorderSide(color: C.border),
+                labelStyle: TextStyle(color: C.text, fontSize: 11),
               );
             }).toList(),
           ),
-        const SizedBox(height: 20),
+        SizedBox(height: 20),
         _sectionTitle(
           'Picked for you',
           action: 'Play mix',
@@ -1737,16 +1797,16 @@ class _HomeScreenState extends State<HomeScreen> {
           _history.isEmpty
               ? 'A discovery mix from your library. It gets smarter as you listen.'
               : 'Ranked from your listening patterns and favorites. Your history stays on this device.',
-          style: const TextStyle(color: C.muted, fontSize: 11, height: 1.6),
+          style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         ..._recommended()
             .take(4)
             .toList()
             .asMap()
             .entries
             .map((entry) => _trackRow(entry.value, entry.key)),
-        const SizedBox(height: 20),
+        SizedBox(height: 20),
         _sectionTitle(
           'A little different',
           action: 'Surprise me',
@@ -1755,21 +1815,21 @@ class _HomeScreenState extends State<HomeScreen> {
             if (picks.isNotEmpty) _play(picks.first, playlist: picks);
           },
         ),
-        const Text(
+        Text(
           'Less-recently played tracks from artists you already enjoy.',
           style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         ..._discoveryTracks()
             .take(3)
             .toList()
             .asMap()
             .entries
             .map((entry) => _trackRow(entry.value, entry.key)),
-        const SizedBox(height: 20),
+        SizedBox(height: 20),
         _sectionTitle('Your favorites'),
         if (_favoriteTracks.isEmpty)
-          const Text(
+          Text(
             'Save tracks with the heart in the player to keep them here.',
             style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
           )
@@ -1780,7 +1840,7 @@ class _HomeScreenState extends State<HomeScreen> {
               .asMap()
               .entries
               .map((entry) => _trackRow(entry.value, entry.key)),
-        const SizedBox(height: 20),
+        SizedBox(height: 20),
         _sectionTitle(
           'Recently played',
           action: 'Your library',
@@ -1792,34 +1852,34 @@ class _HomeScreenState extends State<HomeScreen> {
             scrollDirection: Axis.horizontal,
             children: _history.reversed.take(8).map((event) {
               final track = _tracksById[event.id];
-              if (track == null) return const SizedBox.shrink();
+              if (track == null) return SizedBox.shrink();
 
               return SizedBox(
                 width: 126,
                 child: Padding(
-                  padding: const EdgeInsets.only(right: 14),
+                  padding: EdgeInsets.only(right: 14),
                   child: InkWell(
                     onTap: () => _play(track),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _artwork(track.coverArt, size: 126, seed: track.album),
-                        const SizedBox(height: 9),
+                        SizedBox(height: 9),
                         Text(
                           track.album,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontFamily: 'DMSansMedium',
                             fontSize: 12,
                           ),
                         ),
-                        const SizedBox(height: 3),
+                        SizedBox(height: 3),
                         Text(
                           track.artist,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: C.muted, fontSize: 10),
+                          style: TextStyle(color: C.muted, fontSize: 10),
                         ),
                       ],
                     ),
@@ -1906,7 +1966,7 @@ class _HomeScreenState extends State<HomeScreen> {
     String? subtitle,
   }) {
     final picks = tracks.take(24).toList();
-    if (picks.isEmpty) return const SizedBox.shrink();
+    if (picks.isEmpty) return SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1916,16 +1976,16 @@ class _HomeScreenState extends State<HomeScreen> {
           onAction: () => _play(picks.first, playlist: picks),
         ),
         if (subtitle != null) ...[
-          const SizedBox(height: 4),
-          Text(subtitle, style: const TextStyle(color: C.muted, fontSize: 11)),
+          SizedBox(height: 4),
+          Text(subtitle, style: TextStyle(color: C.muted, fontSize: 11)),
         ],
-        const SizedBox(height: 13),
+        SizedBox(height: 13),
         SizedBox(
           height: 194,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: picks.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 14),
+            separatorBuilder: (_, _) => SizedBox(width: 14),
             itemBuilder: (context, index) {
               final track = picks[index];
               return SizedBox(
@@ -1937,22 +1997,22 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _artwork(track.coverArt, size: 136, seed: track.album),
-                      const SizedBox(height: 8),
+                      SizedBox(height: 8),
                       Text(
                         track.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontFamily: 'DMSansBold',
                           fontSize: 12,
                         ),
                       ),
-                      const SizedBox(height: 3),
+                      SizedBox(height: 3),
                       Text(
                         track.artist,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: C.muted, fontSize: 10),
+                        style: TextStyle(color: C.muted, fontSize: 10),
                       ),
                     ],
                   ),
@@ -1969,7 +2029,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Find your music.',
           style: TextStyle(
             fontFamily: 'SyneBold',
@@ -1977,18 +2037,18 @@ class _HomeScreenState extends State<HomeScreen> {
             letterSpacing: -1.5,
           ),
         ),
-        const SizedBox(height: 8),
-        const Text(
+        SizedBox(height: 8),
+        Text(
           'Search your tracks, artists, and albums.',
           style: TextStyle(color: C.muted, fontSize: 13),
         ),
-        const SizedBox(height: 22),
+        SizedBox(height: 22),
         TextField(
           controller: _search,
           onChanged: _runSearch,
           decoration: InputDecoration(
             hintText: 'Search your library',
-            prefixIcon: const Icon(Icons.search_rounded, color: C.muted),
+            prefixIcon: Icon(Icons.search_rounded, color: C.muted),
             suffixIcon: _search.text.isEmpty
                 ? null
                 : IconButton(
@@ -1996,11 +2056,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       _search.clear();
                       _runSearch('');
                     },
-                    icon: const Icon(Icons.close_rounded, color: C.muted),
+                    icon: Icon(Icons.close_rounded, color: C.muted),
                   ),
           ),
         ),
-        const SizedBox(height: 20),
+        SizedBox(height: 20),
         if (!_connected)
           _emptyState(
             'Connect your music library',
@@ -2011,7 +2071,7 @@ class _HomeScreenState extends State<HomeScreen> {
         else if (_searchError.isNotEmpty)
           _emptyState('Search unavailable', _searchError)
         else if (_searching)
-          const Center(
+          Center(
             child: Padding(
               padding: EdgeInsets.all(24),
               child: CircularProgressIndicator(color: C.lime),
@@ -2042,7 +2102,7 @@ class _HomeScreenState extends State<HomeScreen> {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -2065,64 +2125,64 @@ class _HomeScreenState extends State<HomeScreen> {
             if (_connected)
               IconButton(
                 onPressed: _logout,
-                icon: const Icon(Icons.logout_rounded, color: C.muted),
+                icon: Icon(Icons.logout_rounded, color: C.muted),
               ),
           ],
         ),
-        const SizedBox(height: 24),
+        SizedBox(height: 24),
         if (_showLogin || !_connected)
           _loginCard()
         else ...[
           _card(
             child: Row(
               children: [
-                const Icon(Icons.dns_outlined, color: C.lime, size: 24),
-                const SizedBox(width: 12),
+                Icon(Icons.dns_outlined, color: C.lime, size: 24),
+                SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Navidrome',
                         style: TextStyle(fontFamily: 'DMSansBold'),
                       ),
-                      const SizedBox(height: 4),
+                      SizedBox(height: 4),
                       Text(
                         _credentials?.baseUrl ?? '',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: C.muted, fontSize: 11),
+                        style: TextStyle(color: C.muted, fontSize: 11),
                       ),
-                      const SizedBox(height: 4),
+                      SizedBox(height: 4),
                       Text(
                         'Connected as ${_credentials?.username ?? ''}',
-                        style: const TextStyle(color: C.muted, fontSize: 11),
+                        style: TextStyle(color: C.muted, fontSize: 11),
                       ),
                     ],
                   ),
                 ),
-                TextButton(onPressed: _logout, child: const Text('Log out')),
+                TextButton(onPressed: _logout, child: Text('Log out')),
               ],
             ),
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           Row(
             children: [
               Expanded(child: _homeStat('${_tracks.length}', 'LOADED TRACKS')),
-              const SizedBox(width: 10),
+              SizedBox(width: 10),
               Expanded(
                 child: _homeStat(
                   '${_tracks.map((t) => t.artist).toSet().length}',
                   'ARTISTS',
                 ),
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: 10),
               Expanded(child: _homeStat('$_albumCount', 'ALBUMS')),
             ],
           ),
-          const SizedBox(height: 26),
+          SizedBox(height: 26),
           if (_loading)
-            const Center(
+            Center(
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: CircularProgressIndicator(color: C.lime),
@@ -2144,26 +2204,26 @@ class _HomeScreenState extends State<HomeScreen> {
             )
           else ...[
             _recommendationShelf('Made for you', _recommended()),
-            const SizedBox(height: 26),
+            SizedBox(height: 26),
             _recommendationShelf(
               'More from your favorite artists',
               _tracksFromFavoriteArtists(),
               subtitle: 'Artists you keep coming back to',
             ),
-            const SizedBox(height: 26),
+            SizedBox(height: 26),
             _recommendationShelf(
               'Rediscover your rotation',
               _recentlyPlayedTracks(),
               subtitle: 'Tracks you have listened to before',
             ),
-            const SizedBox(height: 26),
+            SizedBox(height: 26),
             _recommendationShelf(
               'Something new for you',
               _discoveryTracks(),
               subtitle: 'Familiar sounds, with a little variety',
             ),
             if (_favoriteTracks.isNotEmpty) ...[
-              const SizedBox(height: 26),
+              SizedBox(height: 26),
               _recommendationShelf(
                 'Your favorites',
                 _favoriteTracks,
@@ -2171,7 +2231,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ],
-          const SizedBox(height: 18),
+          SizedBox(height: 18),
           _actionButton('Refresh library', onTap: _loadLibrary),
         ],
       ],
@@ -2186,8 +2246,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               _artwork(null, size: 48, seed: 'Navidrome'),
-              const SizedBox(width: 13),
-              const Expanded(
+              SizedBox(width: 13),
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -2205,38 +2265,34 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: 20),
           _fieldLabel('SERVER URL'),
           TextField(
             controller: _url,
             keyboardType: TextInputType.url,
             autocorrect: false,
-            decoration: const InputDecoration(
-              hintText: 'https://music.example.com',
-            ),
+            decoration: InputDecoration(hintText: 'https://music.example.com'),
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: 14),
           _fieldLabel('USERNAME'),
           TextField(
             controller: _username,
             autocorrect: false,
-            decoration: const InputDecoration(
-              hintText: 'Your Navidrome username',
-            ),
+            decoration: InputDecoration(hintText: 'Your Navidrome username'),
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: 14),
           _fieldLabel('PASSWORD'),
           TextField(
             controller: _password,
             obscureText: true,
-            decoration: const InputDecoration(hintText: 'Your password'),
+            decoration: InputDecoration(hintText: 'Your password'),
             onSubmitted: (_) => _connect(),
           ),
           if (_error.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(_error, style: const TextStyle(color: C.danger, fontSize: 12)),
+            SizedBox(height: 12),
+            Text(_error, style: TextStyle(color: C.danger, fontSize: 12)),
           ],
-          const SizedBox(height: 22),
+          SizedBox(height: 22),
           SizedBox(
             width: double.infinity,
             height: 50,
@@ -2251,7 +2307,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               child: _busy
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
@@ -2259,14 +2315,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: C.black,
                       ),
                     )
-                  : const Text(
+                  : Text(
                       'Connect to Navidrome ↗',
                       style: TextStyle(fontFamily: 'DMSansBold', fontSize: 13),
                     ),
             ),
           ),
-          const SizedBox(height: 13),
-          const Text(
+          SizedBox(height: 13),
+          Text(
             'Use the same URL you use to open Navidrome in your browser.',
             style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
           ),
@@ -2279,7 +2335,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Your playlists.',
           style: TextStyle(
             fontFamily: 'SyneBold',
@@ -2287,12 +2343,12 @@ class _HomeScreenState extends State<HomeScreen> {
             letterSpacing: -1.5,
           ),
         ),
-        const SizedBox(height: 8),
-        const Text(
+        SizedBox(height: 8),
+        Text(
           'Build collections for every mood, saved on this device.',
           style: TextStyle(color: C.muted, fontSize: 13, height: 1.6),
         ),
-        const SizedBox(height: 22),
+        SizedBox(height: 22),
         if (!_connected)
           _emptyState(
             'Connect your music library',
@@ -2305,16 +2361,16 @@ class _HomeScreenState extends State<HomeScreen> {
             width: double.infinity,
             child: OutlinedButton.icon(
               onPressed: _createPlaylist,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Create playlist'),
+              icon: Icon(Icons.add_rounded),
+              label: Text('Create playlist'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: C.lime,
-                side: const BorderSide(color: C.border),
-                padding: const EdgeInsets.all(15),
+                side: BorderSide(color: C.border),
+                padding: EdgeInsets.all(15),
               ),
             ),
           ),
-          const SizedBox(height: 18),
+          SizedBox(height: 18),
           if (_playlists.isEmpty)
             _emptyState(
               'Your playlists start here',
@@ -2328,23 +2384,23 @@ class _HomeScreenState extends State<HomeScreen> {
                   .toList();
 
               return Padding(
-                padding: const EdgeInsets.only(bottom: 14),
+                padding: EdgeInsets.only(bottom: 14),
                 child: _card(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.queue_music_rounded,
                             color: C.lime,
                             size: 26,
                           ),
-                          const SizedBox(width: 12),
+                          SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               entry.key,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontFamily: 'DMSansBold',
                                 fontSize: 15,
                               ),
@@ -2355,7 +2411,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             onPressed: tracks.isEmpty
                                 ? null
                                 : () => _play(tracks.first, playlist: tracks),
-                            icon: const Icon(Icons.play_arrow_rounded),
+                            icon: Icon(Icons.play_arrow_rounded),
                           ),
                           IconButton(
                             tooltip: 'Delete playlist',
@@ -2363,19 +2419,16 @@ class _HomeScreenState extends State<HomeScreen> {
                               setState(() => _playlists.remove(entry.key));
                               await _savePlaylists();
                             },
-                            icon: const Icon(
-                              Icons.close_rounded,
-                              color: C.muted,
-                            ),
+                            icon: Icon(Icons.close_rounded, color: C.muted),
                           ),
                         ],
                       ),
                       Text(
                         '${tracks.length} tracks',
-                        style: const TextStyle(color: C.muted, fontSize: 11),
+                        style: TextStyle(color: C.muted, fontSize: 11),
                       ),
                       if (tracks.isNotEmpty) ...[
-                        const SizedBox(height: 12),
+                        SizedBox(height: 12),
                         ...tracks.asMap().entries.map(
                           (item) => _playlistTrackRow(
                             entry.key,
@@ -2384,11 +2437,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 8),
+                      SizedBox(height: 8),
                       TextButton.icon(
                         onPressed: () => _chooseTrackForPlaylist(entry.key),
-                        icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('Add tracks'),
+                        icon: Icon(Icons.add_rounded, size: 18),
+                        label: Text('Add tracks'),
                       ),
                     ],
                   ),
@@ -2437,7 +2490,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
             SizedBox(
@@ -2452,9 +2505,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             _artwork(track.coverArt, size: 46, seed: track.album),
-            const SizedBox(width: 12),
+            SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2469,20 +2522,20 @@ class _HomeScreenState extends State<HomeScreen> {
                       fontSize: 13,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: 4),
                   Text(
                     '${track.artist} · ${track.album}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: C.muted, fontSize: 11),
+                    style: TextStyle(color: C.muted, fontSize: 11),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             Text(
               _formatTime(track.duration.toDouble()),
-              style: const TextStyle(color: C.muted, fontSize: 10),
+              style: TextStyle(color: C.muted, fontSize: 10),
             ),
             IconButton(
               tooltip: 'Remove from playlist',
@@ -2491,7 +2544,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 setState(() => _playlists[playlist]!.remove(track.id));
                 await _savePlaylists();
               },
-              icon: const Icon(
+              icon: Icon(
                 Icons.remove_circle_outline_rounded,
                 size: 20,
                 color: C.muted,
@@ -2507,7 +2560,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Your favorites.',
           style: TextStyle(
             fontFamily: 'SyneBold',
@@ -2515,12 +2568,12 @@ class _HomeScreenState extends State<HomeScreen> {
             letterSpacing: -1.5,
           ),
         ),
-        const SizedBox(height: 8),
-        const Text(
+        SizedBox(height: 8),
+        Text(
           'The tracks you saved with a heart.',
           style: TextStyle(color: C.muted, fontSize: 13),
         ),
-        const SizedBox(height: 22),
+        SizedBox(height: 22),
         if (_favoriteTracks.isEmpty)
           _emptyState(
             'No favorites yet',
@@ -2541,7 +2594,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Your listening.',
           style: TextStyle(
             fontFamily: 'SyneBold',
@@ -2549,12 +2602,12 @@ class _HomeScreenState extends State<HomeScreen> {
             letterSpacing: -1.5,
           ),
         ),
-        const SizedBox(height: 8),
-        const Text(
+        SizedBox(height: 8),
+        Text(
           'A little snapshot of your music world, stored locally.',
           style: TextStyle(color: C.muted, fontSize: 13, height: 1.6),
         ),
-        const SizedBox(height: 20),
+        SizedBox(height: 20),
         LayoutBuilder(
           builder: (context, constraints) {
             const spacing = 10.0;
@@ -2586,10 +2639,10 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           },
         ),
-        const SizedBox(height: 28),
+        SizedBox(height: 28),
         _sectionTitle('Most played albums'),
         if (_mostPlayedAlbums.isEmpty)
-          const Text(
+          Text(
             'Your most-played albums will appear after you start listening.',
             style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
           )
@@ -2606,15 +2659,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   title: Text(
                     item.album,
-                    style: const TextStyle(fontFamily: 'DMSansMedium'),
+                    style: TextStyle(fontFamily: 'DMSansMedium'),
                   ),
                   subtitle: Text(
                     item.artist,
-                    style: const TextStyle(color: C.muted, fontSize: 11),
+                    style: TextStyle(color: C.muted, fontSize: 11),
                   ),
                   trailing: Text(
                     '${item.count} plays',
-                    style: const TextStyle(color: C.lime, fontSize: 10),
+                    style: TextStyle(color: C.lime, fontSize: 10),
                   ),
                   onTap: () => _play(item.track),
                 ),
@@ -2637,16 +2690,13 @@ class _HomeScreenState extends State<HomeScreen> {
         color: C.surface,
         clipBehavior: Clip.antiAlias,
         child: Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             border: Border(top: BorderSide(color: C.border)),
           ),
           child: Stack(
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 9,
-                ),
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 9),
                 child: Row(
                   children: [
                     Expanded(
@@ -2660,7 +2710,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               size: 42,
                               seed: track.album,
                             ),
-                            const SizedBox(width: 10),
+                            SizedBox(width: 10),
                             Expanded(
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -2670,17 +2720,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                     track.title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontFamily: 'DMSansMedium',
                                       fontSize: 12,
                                     ),
                                   ),
-                                  const SizedBox(height: 3),
+                                  SizedBox(height: 3),
                                   Text(
                                     track.artist,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: C.muted,
                                       fontSize: 10,
                                     ),
@@ -2703,12 +2753,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     IconButton(
                       onPressed: () => _skip(1),
-                      icon: const Icon(Icons.skip_next_rounded),
+                      icon: Icon(Icons.skip_next_rounded),
                     ),
                     IconButton(
                       tooltip: 'Open player',
                       onPressed: _openFullPlayer,
-                      icon: const Icon(Icons.open_in_full_rounded, size: 18),
+                      icon: Icon(Icons.open_in_full_rounded, size: 18),
                     ),
                   ],
                 ),
@@ -2721,7 +2771,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   value: progress,
                   minHeight: 2,
                   backgroundColor: Colors.transparent,
-                  valueColor: const AlwaysStoppedAnimation<Color>(C.lime),
+                  valueColor: AlwaysStoppedAnimation<Color>(C.lime),
                 ),
               ),
             ],
@@ -2742,8 +2792,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _tabBar() {
     return Container(
       height: 70,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      decoration: const BoxDecoration(
+      padding: EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
         border: Border(top: BorderSide(color: C.border)),
       ),
       child: Row(
@@ -2766,7 +2816,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           size: 22,
                           color: active ? C.lime : C.muted,
                         ),
-                        const SizedBox(height: 3),
+                        SizedBox(height: 3),
                         Text(
                           tab.label,
                           maxLines: 1,
@@ -2804,28 +2854,28 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _settingsOverlay({required bool isMobile}) {
     final duration = _reduceMotion
         ? Duration.zero
-        : const Duration(milliseconds: 280);
+        : Duration(milliseconds: 280);
     return Positioned.fill(
       child: IgnorePointer(
         ignoring: !_showSettings,
         child: AnimatedSlide(
           offset: _showSettings
               ? Offset.zero
-              : (isMobile ? const Offset(1, 0) : const Offset(0.08, -0.02)),
+              : (isMobile ? Offset(1, 0) : Offset(0.08, -0.02)),
           duration: duration,
           curve: Curves.easeOutCubic,
           child: AnimatedOpacity(
             opacity: _showSettings ? 1 : 0,
             duration: duration,
             child: Material(
-              color: isMobile ? C.bg : const Color(0x99000000),
+              color: isMobile ? C.bg : Color(0x99000000),
               child: Stack(
                 children: [
                   if (!isMobile)
                     Positioned.fill(
                       child: GestureDetector(
                         onTap: () => setState(() => _showSettings = false),
-                        child: const SizedBox.expand(),
+                        child: SizedBox.expand(),
                       ),
                     ),
                   Align(
@@ -2834,7 +2884,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       width: isMobile ? double.infinity : 390,
                       height: isMobile ? double.infinity : null,
                       constraints: isMobile
-                          ? const BoxConstraints.expand()
+                          ? BoxConstraints.expand()
                           : BoxConstraints(
                               maxWidth: MediaQuery.sizeOf(context).width - 28,
                               maxHeight:
@@ -2842,7 +2892,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                       margin: isMobile
                           ? EdgeInsets.zero
-                          : const EdgeInsets.only(top: 68, right: 14, left: 14),
+                          : EdgeInsets.only(top: 68, right: 14, left: 14),
                       padding: EdgeInsets.all(18),
                       decoration: BoxDecoration(
                         color: isMobile ? null : C.surface,
@@ -2852,7 +2902,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             : BorderRadius.circular(18),
                         boxShadow: isMobile
                             ? null
-                            : const [
+                            : [
                                 BoxShadow(
                                   color: Color(0x4D000000),
                                   blurRadius: 24,
@@ -2871,7 +2921,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             children: [
                               Row(
                                 children: [
-                                  const Expanded(
+                                  Expanded(
                                     child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
@@ -2897,12 +2947,64 @@ class _HomeScreenState extends State<HomeScreen> {
                                   IconButton(
                                     onPressed: () =>
                                         setState(() => _showSettings = false),
-                                    icon: const Icon(
+                                    icon: Icon(
                                       Icons.close_rounded,
                                       color: C.muted,
                                     ),
                                   ),
                                 ],
+                              ),
+                              _settingsSection('APPEARANCE'),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  'Theme',
+                                  style: TextStyle(
+                                    fontFamily: 'DMSansMedium',
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  switch (_themeMode.value) {
+                                    NavikaTheme.dark => 'Dark',
+                                    NavikaTheme.amoled => 'AMOLED black',
+                                    NavikaTheme.light => 'Light',
+                                  },
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                trailing: DropdownButton<NavikaTheme>(
+                                  value: _themeMode.value,
+                                  underline: SizedBox.shrink(),
+                                  borderRadius: BorderRadius.circular(12),
+                                  items: [
+                                    DropdownMenuItem(
+                                      value: NavikaTheme.dark,
+                                      child: Text('Dark'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: NavikaTheme.amoled,
+                                      child: Text('AMOLED'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: NavikaTheme.light,
+                                      child: Text('Light'),
+                                    ),
+                                  ],
+                                  onChanged: (theme) async {
+                                    if (theme == null) return;
+                                    _themeMode.value = theme;
+                                    final preferences =
+                                        await SharedPreferences.getInstance();
+                                    await preferences.setString(
+                                      _themeKey,
+                                      theme.name,
+                                    );
+                                    if (mounted) setState(() {});
+                                  },
+                                ),
                               ),
                               _settingsSection('PERFORMANCE'),
                               SwitchListTile(
@@ -2912,14 +3014,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                 activeTrackColor: C.lime,
                                 inactiveThumbColor: C.muted,
                                 inactiveTrackColor: C.surface2,
-                                title: const Text(
+                                title: Text(
                                   'Reduce animations',
                                   style: TextStyle(
                                     fontFamily: 'DMSansMedium',
                                     fontSize: 12,
                                   ),
                                 ),
-                                subtitle: const Text(
+                                subtitle: Text(
                                   'Use fewer entrance animations for a snappier feel.',
                                   style: TextStyle(
                                     color: C.muted,
@@ -2942,14 +3044,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                 activeTrackColor: C.lime,
                                 inactiveThumbColor: C.muted,
                                 inactiveTrackColor: C.surface2,
-                                title: const Text(
+                                title: Text(
                                   'Play next track automatically',
                                   style: TextStyle(
                                     fontFamily: 'DMSansMedium',
                                     fontSize: 12,
                                   ),
                                 ),
-                                subtitle: const Text(
+                                subtitle: Text(
                                   'Continue through the queue when a track ends.',
                                   style: TextStyle(
                                     color: C.muted,
@@ -2974,14 +3076,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                 activeTrackColor: C.lime,
                                 inactiveThumbColor: C.muted,
                                 inactiveTrackColor: C.surface2,
-                                title: const Text(
+                                title: Text(
                                   'Show player visualizer',
                                   style: TextStyle(
                                     fontFamily: 'DMSansMedium',
                                     fontSize: 12,
                                   ),
                                 ),
-                                subtitle: const Text(
+                                subtitle: Text(
                                   'Show animated bars beside the current track.',
                                   style: TextStyle(
                                     color: C.muted,
@@ -3002,18 +3104,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               _settingsSection('LIBRARY'),
                               ListTile(
                                 contentPadding: EdgeInsets.zero,
-                                title: const Text(
+                                title: Text(
                                   'Refresh library',
                                   style: TextStyle(fontSize: 12),
                                 ),
-                                subtitle: const Text(
+                                subtitle: Text(
                                   'Fetch the latest tracks from Navidrome.',
                                   style: TextStyle(
                                     color: C.muted,
                                     fontSize: 10,
                                   ),
                                 ),
-                                trailing: const Icon(
+                                trailing: Icon(
                                   Icons.chevron_right_rounded,
                                   color: C.muted,
                                 ),
@@ -3024,7 +3126,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                               ListTile(
                                 contentPadding: EdgeInsets.zero,
-                                title: const Text(
+                                title: Text(
                                   'Server connection',
                                   style: TextStyle(fontSize: 12),
                                 ),
@@ -3032,12 +3134,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                   _connected
                                       ? (_credentials?.baseUrl ?? '')
                                       : 'Connect to a Navidrome server',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     color: C.muted,
                                     fontSize: 10,
                                   ),
                                 ),
-                                trailing: const Icon(
+                                trailing: Icon(
                                   Icons.chevron_right_rounded,
                                   color: C.muted,
                                 ),
@@ -3049,18 +3151,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               _settingsSection('YOUR DATA'),
                               ListTile(
                                 contentPadding: EdgeInsets.zero,
-                                title: const Text(
+                                title: Text(
                                   'Clear listening history',
                                   style: TextStyle(fontSize: 12),
                                 ),
-                                subtitle: const Text(
+                                subtitle: Text(
                                   'Remove locally stored listening history and stats.',
                                   style: TextStyle(
                                     color: C.muted,
                                     fontSize: 10,
                                   ),
                                 ),
-                                trailing: const Icon(
+                                trailing: Icon(
                                   Icons.close_rounded,
                                   color: C.danger,
                                   size: 18,
@@ -3078,12 +3180,12 @@ class _HomeScreenState extends State<HomeScreen> {
                               if (_connected)
                                 ListTile(
                                   contentPadding: EdgeInsets.zero,
-                                  leading: const Icon(
+                                  leading: Icon(
                                     Icons.logout_rounded,
                                     color: C.danger,
                                     size: 18,
                                   ),
-                                  title: const Text(
+                                  title: Text(
                                     'Disconnect server',
                                     style: TextStyle(
                                       color: C.danger,
@@ -3095,8 +3197,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                     _logout();
                                   },
                                 ),
-                              const SizedBox(height: 12),
-                              const Text(
+                              SizedBox(height: 12),
+                              Text(
                                 'Navika · Your listening history stays on this device.',
                                 style: TextStyle(
                                   color: C.muted,
@@ -3121,10 +3223,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _settingsSection(String title) {
     return Padding(
-      padding: const EdgeInsets.only(top: 17, bottom: 5),
+      padding: EdgeInsets.only(top: 17, bottom: 5),
       child: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           color: C.lime,
           fontFamily: 'DMSansBold',
           fontSize: 9,
@@ -3149,11 +3251,9 @@ class _HomeScreenState extends State<HomeScreen> {
       color: Colors.transparent,
       child: TweenAnimationBuilder<double>(
         tween: Tween(begin: 0, end: 1),
-        duration: _reduceMotion ? Duration.zero : const Duration(seconds: 8),
+        duration: _reduceMotion ? Duration.zero : Duration(seconds: 8),
         builder: (context, phase, child) => AnimatedContainer(
-          duration: _reduceMotion
-              ? Duration.zero
-              : const Duration(milliseconds: 900),
+          duration: _reduceMotion ? Duration.zero : Duration(milliseconds: 900),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment(-1 + phase * 2, -1),
@@ -3163,7 +3263,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Color.lerp(ambientColors.last, C.bg, .22)!,
                 C.bg,
               ],
-              stops: const [0, .48, 1],
+              stops: [0, .48, 1],
             ),
           ),
           child: SafeArea(
@@ -3180,10 +3280,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           _showPlayer = false;
                           _showUpNext = false;
                         }),
-                        icon: const Icon(Icons.chevron_left_rounded, size: 30),
+                        icon: Icon(Icons.chevron_left_rounded, size: 30),
                       ),
-                      const Spacer(),
-                      const Column(
+                      Spacer(),
+                      Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
@@ -3205,7 +3305,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ],
                       ),
-                      const Spacer(),
+                      Spacer(),
                       IconButton(
                         tooltip: _showVisualizer
                             ? 'Hide visualizer'
@@ -3219,7 +3319,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       IconButton(
                         onPressed: () => _showTrackMenu(track),
-                        icon: const Icon(Icons.more_horiz_rounded),
+                        icon: Icon(Icons.more_horiz_rounded),
                       ),
                     ],
                   ),
@@ -3233,11 +3333,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
 
                       if (constraints.maxWidth > 680) {
-                        final desktopArtSize = (constraints.maxHeight * .62)
-                            .clamp(220.0, 420.0);
+                        final desktopArtSize = (constraints.maxHeight * .72)
+                            .clamp(260.0, 520.0);
                         if (_showUpNext) {
                           return Padding(
-                            padding: const EdgeInsets.fromLTRB(28, 12, 28, 12),
+                            padding: EdgeInsets.fromLTRB(28, 12, 28, 12),
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
@@ -3247,7 +3347,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      const Text(
+                                      Text(
                                         'NOW PLAYING',
                                         style: TextStyle(
                                           color: C.muted,
@@ -3256,7 +3356,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           fontFamily: 'DMSansBold',
                                         ),
                                       ),
-                                      const Spacer(),
+                                      Spacer(),
                                       Center(
                                         child: ClipRRect(
                                           borderRadius: BorderRadius.circular(
@@ -3269,7 +3369,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(height: 12),
+                                      SizedBox(height: 12),
                                       Row(
                                         children: [
                                           Expanded(
@@ -3277,7 +3377,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                               track.title,
                                               maxLines: 2,
                                               overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 fontFamily: 'SyneBold',
                                                 fontSize: 22,
                                                 height: 1.0,
@@ -3297,17 +3397,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 4),
+                                      SizedBox(height: 4),
                                       Text(
                                         '${track.artist} · ${track.album}',
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           color: C.muted,
                                           fontSize: 12,
                                         ),
                                       ),
-                                      const SizedBox(height: 8),
+                                      SizedBox(height: 8),
                                       _seekBar(progress, duration),
                                       Row(
                                         mainAxisAlignment:
@@ -3315,21 +3415,21 @@ class _HomeScreenState extends State<HomeScreen> {
                                         children: [
                                           Text(
                                             _formatTime(position),
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               color: C.muted,
                                               fontSize: 10,
                                             ),
                                           ),
                                           Text(
                                             _formatTime(duration),
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               color: C.muted,
                                               fontSize: 10,
                                             ),
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 0),
+                                      SizedBox(height: 0),
                                       Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.center,
@@ -3347,7 +3447,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                           IconButton(
                                             onPressed: () => _skip(-1),
-                                            icon: const Icon(
+                                            icon: Icon(
                                               Icons.skip_previous_rounded,
                                               size: 27,
                                             ),
@@ -3366,7 +3466,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                           IconButton(
                                             onPressed: () => _skip(1),
-                                            icon: const Icon(
+                                            icon: Icon(
                                               Icons.skip_next_rounded,
                                               size: 27,
                                             ),
@@ -3387,9 +3487,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ],
                                   ),
                                 ),
-                                const SizedBox(width: 28),
+                                SizedBox(width: 28),
                                 Container(width: 1, color: C.border),
-                                const SizedBox(width: 24),
+                                SizedBox(width: 24),
                                 Expanded(
                                   flex: 4,
                                   child: Column(
@@ -3398,7 +3498,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     children: [
                                       Row(
                                         children: [
-                                          const Expanded(
+                                          Expanded(
                                             child: Text(
                                               'Up next',
                                               style: TextStyle(
@@ -3414,12 +3514,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 ..add(track);
                                               _queueIndex = 0;
                                             }),
-                                            child: const Text('Clear'),
+                                            child: Text('Clear'),
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 8),
-                                      const Text(
+                                      SizedBox(height: 8),
+                                      Text(
                                         'NOW PLAYING',
                                         style: TextStyle(
                                           color: C.muted,
@@ -3427,9 +3527,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                           letterSpacing: 1.1,
                                         ),
                                       ),
-                                      const SizedBox(height: 10),
+                                      SizedBox(height: 10),
                                       Container(
-                                        padding: const EdgeInsets.all(10),
+                                        padding: EdgeInsets.all(10),
                                         decoration: BoxDecoration(
                                           color: C.surface,
                                           borderRadius: BorderRadius.circular(
@@ -3447,7 +3547,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 seed: track.album,
                                               ),
                                             ),
-                                            const SizedBox(width: 10),
+                                            SizedBox(width: 10),
                                             Expanded(
                                               child: Column(
                                                 crossAxisAlignment:
@@ -3458,7 +3558,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                     maxLines: 1,
                                                     overflow:
                                                         TextOverflow.ellipsis,
-                                                    style: const TextStyle(
+                                                    style: TextStyle(
                                                       fontSize: 12,
                                                       fontFamily: 'DMSansBold',
                                                     ),
@@ -3468,7 +3568,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                     maxLines: 1,
                                                     overflow:
                                                         TextOverflow.ellipsis,
-                                                    style: const TextStyle(
+                                                    style: TextStyle(
                                                       color: C.muted,
                                                       fontSize: 10,
                                                     ),
@@ -3476,7 +3576,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 ],
                                               ),
                                             ),
-                                            const Icon(
+                                            Icon(
                                               Icons.graphic_eq_rounded,
                                               color: C.lime,
                                               size: 17,
@@ -3484,8 +3584,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ],
                                         ),
                                       ),
-                                      const SizedBox(height: 22),
-                                      const Text(
+                                      SizedBox(height: 22),
+                                      Text(
                                         'NEXT IN QUEUE',
                                         style: TextStyle(
                                           color: C.muted,
@@ -3493,7 +3593,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           letterSpacing: 1.1,
                                         ),
                                       ),
-                                      const SizedBox(height: 8),
+                                      SizedBox(height: 8),
                                       Expanded(
                                         child: ListView(
                                           children: _queue
@@ -3519,7 +3619,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           );
                         }
                         return SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(28, 20, 28, 16),
+                          padding: EdgeInsets.fromLTRB(28, 20, 28, 16),
                           child: ConstrainedBox(
                             constraints: BoxConstraints(
                               minHeight: constraints.maxHeight - 36,
@@ -3535,7 +3635,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     seed: track.album,
                                   ),
                                 ),
-                                const SizedBox(width: 30),
+                                SizedBox(width: 30),
                                 Expanded(
                                   child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
@@ -3546,34 +3646,34 @@ class _HomeScreenState extends State<HomeScreen> {
                                         track.title,
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontFamily: 'SyneBold',
                                           fontSize: 27,
                                           letterSpacing: -.8,
                                         ),
                                       ),
-                                      const SizedBox(height: 7),
+                                      SizedBox(height: 7),
                                       Text(
                                         track.artist,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           color: C.muted,
                                           fontSize: 14,
                                         ),
                                       ),
-                                      const SizedBox(height: 4),
+                                      SizedBox(height: 4),
                                       Text(
                                         track.album,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           color: C.muted,
                                           fontSize: 11,
                                         ),
                                       ),
                                       if (_showVisualizer) ...[
-                                        const SizedBox(height: 12),
+                                        SizedBox(height: 12),
                                         _visualizer(),
                                       ],
                                       Align(
@@ -3592,30 +3692,30 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(height: 8),
+                                      SizedBox(height: 8),
                                       _seekBar(progress, duration),
-                                      const SizedBox(height: 8),
+                                      SizedBox(height: 8),
                                       Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceBetween,
                                         children: [
                                           Text(
                                             _formatTime(position),
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               color: C.muted,
                                               fontSize: 10,
                                             ),
                                           ),
                                           Text(
                                             _formatTime(duration),
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               color: C.muted,
                                               fontSize: 10,
                                             ),
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 10),
+                                      SizedBox(height: 10),
                                       Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceBetween,
@@ -3624,7 +3724,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             tooltip: 'Shuffle',
                                             visualDensity:
                                                 VisualDensity.compact,
-                                            constraints: const BoxConstraints(
+                                            constraints: BoxConstraints(
                                               minWidth: 40,
                                               minHeight: 40,
                                             ),
@@ -3642,12 +3742,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                             tooltip: 'Previous track',
                                             visualDensity:
                                                 VisualDensity.compact,
-                                            constraints: const BoxConstraints(
+                                            constraints: BoxConstraints(
                                               minWidth: 40,
                                               minHeight: 40,
                                             ),
                                             onPressed: () => _skip(-1),
-                                            icon: const Icon(
+                                            icon: Icon(
                                               Icons.skip_previous_rounded,
                                               size: 26,
                                             ),
@@ -3660,7 +3760,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             child: Container(
                                               width: 50,
                                               height: 50,
-                                              decoration: const BoxDecoration(
+                                              decoration: BoxDecoration(
                                                 color: C.lime,
                                                 shape: BoxShape.circle,
                                               ),
@@ -3677,12 +3777,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                             tooltip: 'Next track',
                                             visualDensity:
                                                 VisualDensity.compact,
-                                            constraints: const BoxConstraints(
+                                            constraints: BoxConstraints(
                                               minWidth: 40,
                                               minHeight: 40,
                                             ),
                                             onPressed: () => _skip(1),
-                                            icon: const Icon(
+                                            icon: Icon(
                                               Icons.skip_next_rounded,
                                               size: 26,
                                             ),
@@ -3691,7 +3791,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             tooltip: 'Repeat mode',
                                             visualDensity:
                                                 VisualDensity.compact,
-                                            constraints: const BoxConstraints(
+                                            constraints: BoxConstraints(
                                               minWidth: 40,
                                               minHeight: 40,
                                             ),
@@ -3728,9 +3828,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           onPressed: () => setState(
                                             () => _showUpNext = true,
                                           ),
-                                          icon: const Icon(
-                                            Icons.queue_music_rounded,
-                                          ),
+                                          icon: Icon(Icons.queue_music_rounded),
                                           label: Text(
                                             'Up Next · ${_queue.length - _queueIndex - 1}',
                                           ),
@@ -3746,7 +3844,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       }
 
                       return SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(22, 16, 22, 10),
+                        padding: EdgeInsets.fromLTRB(22, 16, 22, 10),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -3770,7 +3868,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                   ),
                               if (_queueIndex >= _queue.length - 1)
-                                const Padding(
+                                Padding(
                                   padding: EdgeInsets.symmetric(vertical: 14),
                                   child: Text(
                                     "You're at the end of the queue.",
@@ -3792,7 +3890,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       seed: track.album,
                                     ),
                                   ),
-                                  const SizedBox(height: 18),
+                                  SizedBox(height: 18),
                                   SizedBox(
                                     width: double.infinity,
                                     child: Column(
@@ -3804,39 +3902,39 @@ class _HomeScreenState extends State<HomeScreen> {
                                           maxLines: 3,
                                           overflow: TextOverflow.ellipsis,
                                           textAlign: TextAlign.center,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontFamily: 'SyneBold',
                                             fontSize: 21,
                                             letterSpacing: -.7,
                                           ),
                                         ),
-                                        const SizedBox(height: 6),
+                                        SizedBox(height: 6),
                                         Text(
                                           track.artist,
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                           textAlign: TextAlign.center,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             color: C.muted,
                                             fontSize: 13,
                                           ),
                                         ),
-                                        const SizedBox(height: 4),
+                                        SizedBox(height: 4),
                                         Text(
                                           track.album,
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                           textAlign: TextAlign.center,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             color: C.muted,
                                             fontSize: 11,
                                           ),
                                         ),
                                         if (_showVisualizer) ...[
-                                          const SizedBox(height: 8),
+                                          SizedBox(height: 8),
                                           _visualizer(),
                                         ],
-                                        const SizedBox(height: 10),
+                                        SizedBox(height: 10),
                                         IconButton(
                                           alignment: Alignment.center,
                                           padding: EdgeInsets.zero,
@@ -3858,35 +3956,35 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ],
                               ),
                             ],
-                            const SizedBox(height: 20),
+                            SizedBox(height: 20),
                             _seekBar(progress, duration),
-                            const SizedBox(height: 8),
+                            SizedBox(height: 8),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
                                   _formatTime(position),
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     color: C.muted,
                                     fontSize: 10,
                                   ),
                                 ),
                                 Text(
                                   _formatTime(duration),
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     color: C.muted,
                                     fontSize: 10,
                                   ),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 18),
+                            SizedBox(height: 18),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 IconButton(
                                   visualDensity: VisualDensity.compact,
-                                  constraints: const BoxConstraints(
+                                  constraints: BoxConstraints(
                                     minWidth: 40,
                                     minHeight: 40,
                                   ),
@@ -3900,12 +3998,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                                 IconButton(
                                   visualDensity: VisualDensity.compact,
-                                  constraints: const BoxConstraints(
+                                  constraints: BoxConstraints(
                                     minWidth: 40,
                                     minHeight: 40,
                                   ),
                                   onPressed: () => _skip(-1),
-                                  icon: const Icon(
+                                  icon: Icon(
                                     Icons.skip_previous_rounded,
                                     size: 27,
                                   ),
@@ -3916,7 +4014,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   child: Container(
                                     width: 52,
                                     height: 52,
-                                    decoration: const BoxDecoration(
+                                    decoration: BoxDecoration(
                                       color: C.lime,
                                       shape: BoxShape.circle,
                                     ),
@@ -3931,19 +4029,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                                 IconButton(
                                   visualDensity: VisualDensity.compact,
-                                  constraints: const BoxConstraints(
+                                  constraints: BoxConstraints(
                                     minWidth: 40,
                                     minHeight: 40,
                                   ),
                                   onPressed: () => _skip(1),
-                                  icon: const Icon(
-                                    Icons.skip_next_rounded,
-                                    size: 27,
-                                  ),
+                                  icon: Icon(Icons.skip_next_rounded, size: 27),
                                 ),
                                 IconButton(
                                   visualDensity: VisualDensity.compact,
-                                  constraints: const BoxConstraints(
+                                  constraints: BoxConstraints(
                                     minWidth: 40,
                                     minHeight: 40,
                                   ),
@@ -3972,7 +4067,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 16),
+                            SizedBox(height: 16),
                             Align(
                               alignment: Alignment.centerLeft,
                               child: OutlinedButton.icon(
@@ -4005,7 +4100,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<Color> _playerAmbientColors(MusicTrack track) {
-    const palettes = <List<Color>>[
+    if (C.light) {
+      return [const Color(0xFFF1EEE5), const Color(0xFFE4E8D8)];
+    }
+    final palettes = <List<Color>>[
       [Color(0xFF7B4A35), Color(0xFF38231D)],
       [Color(0xFF3F685B), Color(0xFF1D302B)],
       [Color(0xFF685B86), Color(0xFF29233A)],
@@ -4024,7 +4122,7 @@ class _HomeScreenState extends State<HomeScreen> {
       onLongPress: () => _showTrackMenu(track),
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
             SizedBox(
@@ -4039,9 +4137,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             _artwork(track.coverArt, size: 46, seed: track.album),
-            const SizedBox(width: 12),
+            SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -4056,29 +4154,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       fontSize: 13,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: 4),
                   Text(
                     '${track.artist} · ${track.album}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: C.muted, fontSize: 11),
+                    style: TextStyle(color: C.muted, fontSize: 11),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             Text(
               _formatTime(track.duration.toDouble()),
-              style: const TextStyle(color: C.muted, fontSize: 10),
+              style: TextStyle(color: C.muted, fontSize: 10),
             ),
             IconButton(
               tooltip: 'More options',
               onPressed: () => _showTrackMenu(track),
-              icon: const Icon(
-                Icons.more_horiz_rounded,
-                color: C.muted,
-                size: 20,
-              ),
+              icon: Icon(Icons.more_horiz_rounded, color: C.muted, size: 20),
             ),
           ],
         ),
@@ -4094,10 +4188,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final url = coverArt == null ? null : _client?.coverArtUrl(coverArt);
 
     final colors = [
-      const Color(0xFF3B4430),
-      const Color(0xFF35333E),
-      const Color(0xFF3D3329),
-      const Color(0xFF303C3A),
+      Color(0xFF3B4430),
+      Color(0xFF35333E),
+      Color(0xFF3D3329),
+      Color(0xFF303C3A),
     ];
 
     final color = colors[seed.hashCode.abs() % colors.length];
@@ -4125,7 +4219,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Container(
                         width: 7,
                         height: 7,
-                        decoration: const BoxDecoration(
+                        decoration: BoxDecoration(
                           color: C.lime,
                           shape: BoxShape.circle,
                         ),
@@ -4140,7 +4234,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 errorBuilder: (context, error, stackTrace) => Container(
                   color: color,
                   alignment: Alignment.center,
-                  child: const Icon(
+                  child: Icon(
                     Icons.music_note_rounded,
                     color: C.lime,
                     size: 30,
@@ -4154,7 +4248,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _card({required Widget child}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: C.surface,
         border: Border.all(color: C.border),
@@ -4166,24 +4260,41 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _sectionTitle(String title, {String? action, VoidCallback? onAction}) {
     return Padding(
-      padding: const EdgeInsets.only(top: 2, bottom: 14),
+      padding: EdgeInsets.only(top: 2, bottom: 14),
       child: Row(
         children: [
           Expanded(
             child: Text(
               title,
-              style: const TextStyle(fontFamily: 'DMSansBold', fontSize: 19),
+              style: TextStyle(fontFamily: 'DMSansBold', fontSize: 19),
             ),
           ),
           if (action != null)
-            InkWell(
-              onTap: onAction,
-              child: Text(
-                action,
-                style: const TextStyle(
-                  color: C.lime,
-                  fontFamily: 'DMSansMedium',
-                  fontSize: 12,
+            Material(
+              color: C.surface2,
+              borderRadius: BorderRadius.circular(9),
+              child: InkWell(
+                onTap: onAction,
+                borderRadius: BorderRadius.circular(9),
+                hoverColor: C.lime.withValues(alpha: .10),
+                splashColor: C.lime.withValues(alpha: .18),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: C.border),
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Text(
+                    action,
+                    style: TextStyle(
+                      color: C.lime,
+                      fontFamily: 'DMSansBold',
+                      fontSize: 11,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -4194,7 +4305,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _homeStat(String value, String label) {
     return Container(
-      padding: const EdgeInsets.all(13),
+      padding: EdgeInsets.all(13),
       decoration: BoxDecoration(
         color: C.surface,
         border: Border.all(color: C.border),
@@ -4203,16 +4314,13 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            value,
-            style: const TextStyle(fontFamily: 'DMSansBold', fontSize: 21),
-          ),
-          const SizedBox(height: 5),
+          Text(value, style: TextStyle(fontFamily: 'DMSansBold', fontSize: 21)),
+          SizedBox(height: 5),
           Text(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               color: C.muted,
               fontFamily: 'DMSansBold',
               fontSize: 9,
@@ -4230,10 +4338,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _fieldLabel(String label) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.only(bottom: 8),
       child: Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           color: C.muted,
           fontFamily: 'DMSansBold',
           fontSize: 10,
@@ -4244,21 +4352,34 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _actionButton(String label, {required VoidCallback onTap}) {
-    return InkWell(
-      onTap: onTap,
+    return Material(
+      color: C.surface2,
       borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
-        decoration: BoxDecoration(
-          color: C.surface2,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: C.lime,
-            fontFamily: 'DMSansBold',
-            fontSize: 12,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        hoverColor: C.lime.withValues(alpha: .10),
+        splashColor: C.lime.withValues(alpha: .18),
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          decoration: BoxDecoration(
+            border: Border.all(color: C.border),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: C.lime,
+                  fontFamily: 'DMSansBold',
+                  fontSize: 12,
+                ),
+              ),
+              SizedBox(width: 8),
+              Icon(Icons.arrow_forward_rounded, color: C.lime, size: 15),
+            ],
           ),
         ),
       ),
@@ -4270,7 +4391,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       height: 54,
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: C.black.withValues(alpha: .35),
         border: Border.all(color: C.border.withValues(alpha: .7)),
@@ -4286,9 +4407,9 @@ class _HomeScreenState extends State<HomeScreen> {
               : 5 + envelope * 7;
           return Expanded(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 1.2),
+              padding: EdgeInsets.symmetric(horizontal: 1.2),
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 130),
+                duration: Duration(milliseconds: 130),
                 height: height,
                 decoration: BoxDecoration(
                   color: _player.playing
@@ -4307,8 +4428,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _seekBar(double progress, double duration) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
+      onHorizontalDragStart: (_) => setState(() => _seeking = true),
       onHorizontalDragUpdate: (details) =>
           _seekTo(details.globalPosition, duration),
+      onHorizontalDragEnd: (_) => setState(() => _seeking = false),
+      onHorizontalDragCancel: () => setState(() => _seeking = false),
       onTapDown: (details) => _seekTo(details.globalPosition, duration),
       child: SizedBox(
         key: _progressBarKey,
@@ -4317,9 +4441,10 @@ class _HomeScreenState extends State<HomeScreen> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final width = constraints.maxWidth;
-            final thumbLeft = (width * progress - 6).clamp(
+            final thumbSize = _seeking ? 20.0 : 12.0;
+            final thumbLeft = (width * progress - thumbSize / 2).clamp(
               0.0,
-              (width - 12).clamp(0.0, double.infinity),
+              (width - thumbSize).clamp(0.0, double.infinity),
             );
             return Stack(
               alignment: Alignment.centerLeft,
@@ -4329,20 +4454,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: LinearProgressIndicator(
                     value: progress,
                     minHeight: 4,
-                    backgroundColor: const Color(0xFF55574D),
-                    valueColor: const AlwaysStoppedAnimation(C.lime),
+                    backgroundColor: C.border,
+                    valueColor: AlwaysStoppedAnimation(C.lime),
                   ),
                 ),
                 Positioned(
                   left: thumbLeft,
                   child: Container(
-                    width: 12,
-                    height: 12,
+                    width: thumbSize,
+                    height: thumbSize,
                     decoration: BoxDecoration(
                       color: C.lime,
                       shape: BoxShape.circle,
                       border: Border.all(color: C.text, width: 1.5),
-                      boxShadow: const [
+                      boxShadow: [
                         BoxShadow(color: Color(0x55000000), blurRadius: 4),
                       ],
                     ),
@@ -4363,22 +4488,22 @@ class _HomeScreenState extends State<HomeScreen> {
     VoidCallback? onTap,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 40),
+      padding: EdgeInsets.symmetric(vertical: 40),
       child: Column(
         children: [
           Text(
             title,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontFamily: 'DMSansBold', fontSize: 17),
+            style: TextStyle(fontFamily: 'DMSansBold', fontSize: 17),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           Text(
             subtitle,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: C.muted, fontSize: 12, height: 1.6),
+            style: TextStyle(color: C.muted, fontSize: 12, height: 1.6),
           ),
           if (action != null && onTap != null) ...[
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
             _actionButton(action, onTap: onTap),
           ],
         ],
