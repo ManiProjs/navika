@@ -1160,7 +1160,8 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Scaffold(
         backgroundColor: C.bg,
         body: SafeArea(
-          top: !isMacOS,
+          top: !isMacOS && (isDesktop || !_showPlayer),
+          bottom: isDesktop || !_showPlayer,
           child: Stack(
             children: [
               Column(
@@ -3093,14 +3094,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final artSize = (constraints.maxWidth * .34).clamp(
-                        112.0,
-                        210.0,
+                      final artSize = (constraints.maxWidth * .72).clamp(
+                        220.0,
+                        390.0,
                       );
 
                       if (constraints.maxWidth > 680) {
-                        final desktopArtSize = (constraints.maxHeight * .48)
-                            .clamp(170.0, 310.0);
+                        final desktopArtSize = (constraints.maxHeight * .62)
+                            .clamp(220.0, 420.0);
                         if (_showUpNext) {
                           return Padding(
                             padding: const EdgeInsets.fromLTRB(28, 12, 28, 12),
