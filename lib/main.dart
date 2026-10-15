@@ -2740,240 +2740,253 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ],
                       ),
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Settings',
-                                        style: TextStyle(
-                                          fontFamily: 'SyneBold',
-                                          fontSize: 22,
+                      child: Material(
+                        color: isMobile ? C.bg : C.surface,
+                        borderRadius: isMobile
+                            ? BorderRadius.zero
+                            : BorderRadius.circular(18),
+                        clipBehavior: Clip.antiAlias,
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Settings',
+                                          style: TextStyle(
+                                            fontFamily: 'SyneBold',
+                                            fontSize: 22,
+                                          ),
                                         ),
-                                      ),
-                                      SizedBox(height: 4),
-                                      Text(
-                                        'Make Navika feel right.',
-                                        style: TextStyle(
-                                          color: C.muted,
-                                          fontSize: 11,
+                                        SizedBox(height: 4),
+                                        Text(
+                                          'Make Navika feel right.',
+                                          style: TextStyle(
+                                            color: C.muted,
+                                            fontSize: 11,
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                IconButton(
-                                  onPressed: () =>
-                                      setState(() => _showSettings = false),
-                                  icon: const Icon(
-                                    Icons.close_rounded,
-                                    color: C.muted,
+                                  IconButton(
+                                    onPressed: () =>
+                                        setState(() => _showSettings = false),
+                                    icon: const Icon(
+                                      Icons.close_rounded,
+                                      color: C.muted,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            _settingsSection('PERFORMANCE'),
-                            SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              value: _reduceMotion,
-                              activeThumbColor: C.black,
-                              activeTrackColor: C.lime,
-                              inactiveThumbColor: C.muted,
-                              inactiveTrackColor: C.surface2,
-                              title: const Text(
-                                'Reduce animations',
-                                style: TextStyle(
-                                  fontFamily: 'DMSansMedium',
-                                  fontSize: 12,
-                                ),
+                                ],
                               ),
-                              subtitle: const Text(
-                                'Use fewer entrance animations for a snappier feel.',
-                                style: TextStyle(
-                                  color: C.muted,
-                                  fontSize: 10,
-                                  height: 1.5,
-                                ),
-                              ),
-                              onChanged: (value) async {
-                                setState(() => _reduceMotion = value);
-                                final preferences =
-                                    await SharedPreferences.getInstance();
-                                await preferences.setBool(_motionKey, value);
-                              },
-                            ),
-                            _settingsSection('PLAYBACK'),
-                            SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              value: _autoAdvance,
-                              activeThumbColor: C.black,
-                              activeTrackColor: C.lime,
-                              inactiveThumbColor: C.muted,
-                              inactiveTrackColor: C.surface2,
-                              title: const Text(
-                                'Play next track automatically',
-                                style: TextStyle(
-                                  fontFamily: 'DMSansMedium',
-                                  fontSize: 12,
-                                ),
-                              ),
-                              subtitle: const Text(
-                                'Continue through the queue when a track ends.',
-                                style: TextStyle(
-                                  color: C.muted,
-                                  fontSize: 10,
-                                  height: 1.5,
-                                ),
-                              ),
-                              onChanged: (value) async {
-                                setState(() => _autoAdvance = value);
-                                final preferences =
-                                    await SharedPreferences.getInstance();
-                                await preferences.setBool(
-                                  _autoAdvanceKey,
-                                  value,
-                                );
-                              },
-                            ),
-                            SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              value: _showVisualizer,
-                              activeThumbColor: C.black,
-                              activeTrackColor: C.lime,
-                              inactiveThumbColor: C.muted,
-                              inactiveTrackColor: C.surface2,
-                              title: const Text(
-                                'Show player visualizer',
-                                style: TextStyle(
-                                  fontFamily: 'DMSansMedium',
-                                  fontSize: 12,
-                                ),
-                              ),
-                              subtitle: const Text(
-                                'Show animated bars beside the current track.',
-                                style: TextStyle(
-                                  color: C.muted,
-                                  fontSize: 10,
-                                  height: 1.5,
-                                ),
-                              ),
-                              onChanged: (value) async {
-                                setState(() => _showVisualizer = value);
-                                final preferences =
-                                    await SharedPreferences.getInstance();
-                                await preferences.setBool(
-                                  _visualizerKey,
-                                  value,
-                                );
-                              },
-                            ),
-                            _settingsSection('LIBRARY'),
-                            ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text(
-                                'Refresh library',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                              subtitle: const Text(
-                                'Fetch the latest tracks from Navidrome.',
-                                style: TextStyle(color: C.muted, fontSize: 10),
-                              ),
-                              trailing: const Icon(
-                                Icons.chevron_right_rounded,
-                                color: C.muted,
-                              ),
-                              onTap: () {
-                                setState(() => _showSettings = false);
-                                _loadLibrary(force: true);
-                              },
-                            ),
-                            ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text(
-                                'Server connection',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                              subtitle: Text(
-                                _connected
-                                    ? (_credentials?.baseUrl ?? '')
-                                    : 'Connect to a Navidrome server',
-                                style: const TextStyle(
-                                  color: C.muted,
-                                  fontSize: 10,
-                                ),
-                              ),
-                              trailing: const Icon(
-                                Icons.chevron_right_rounded,
-                                color: C.muted,
-                              ),
-                              onTap: () {
-                                setState(() => _showSettings = false);
-                                _selectTab(AppTab.library);
-                              },
-                            ),
-                            _settingsSection('YOUR DATA'),
-                            ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text(
-                                'Clear listening history',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                              subtitle: const Text(
-                                'Remove locally stored listening history and stats.',
-                                style: TextStyle(color: C.muted, fontSize: 10),
-                              ),
-                              trailing: const Icon(
-                                Icons.close_rounded,
-                                color: C.danger,
-                                size: 18,
-                              ),
-                              onTap: () async {
-                                setState(() {
-                                  _history.clear();
-                                  _showSettings = false;
-                                });
-                                final preferences =
-                                    await SharedPreferences.getInstance();
-                                await preferences.remove(_historyKey);
-                              },
-                            ),
-                            if (_connected)
-                              ListTile(
+                              _settingsSection('PERFORMANCE'),
+                              SwitchListTile(
                                 contentPadding: EdgeInsets.zero,
-                                leading: const Icon(
-                                  Icons.logout_rounded,
-                                  color: C.danger,
-                                  size: 18,
-                                ),
+                                value: _reduceMotion,
+                                activeThumbColor: C.black,
+                                activeTrackColor: C.lime,
+                                inactiveThumbColor: C.muted,
+                                inactiveTrackColor: C.surface2,
                                 title: const Text(
-                                  'Disconnect server',
+                                  'Reduce animations',
                                   style: TextStyle(
-                                    color: C.danger,
+                                    fontFamily: 'DMSansMedium',
                                     fontSize: 12,
                                   ),
                                 ),
-                                onTap: () {
-                                  setState(() => _showSettings = false);
-                                  _logout();
+                                subtitle: const Text(
+                                  'Use fewer entrance animations for a snappier feel.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                    height: 1.5,
+                                  ),
+                                ),
+                                onChanged: (value) async {
+                                  setState(() => _reduceMotion = value);
+                                  final preferences =
+                                      await SharedPreferences.getInstance();
+                                  await preferences.setBool(_motionKey, value);
                                 },
                               ),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'Navika · Your listening history stays on this device.',
-                              style: TextStyle(
-                                color: C.muted,
-                                fontSize: 9,
-                                height: 1.6,
+                              _settingsSection('PLAYBACK'),
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                value: _autoAdvance,
+                                activeThumbColor: C.black,
+                                activeTrackColor: C.lime,
+                                inactiveThumbColor: C.muted,
+                                inactiveTrackColor: C.surface2,
+                                title: const Text(
+                                  'Play next track automatically',
+                                  style: TextStyle(
+                                    fontFamily: 'DMSansMedium',
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                subtitle: const Text(
+                                  'Continue through the queue when a track ends.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                    height: 1.5,
+                                  ),
+                                ),
+                                onChanged: (value) async {
+                                  setState(() => _autoAdvance = value);
+                                  final preferences =
+                                      await SharedPreferences.getInstance();
+                                  await preferences.setBool(
+                                    _autoAdvanceKey,
+                                    value,
+                                  );
+                                },
                               ),
-                            ),
-                          ],
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                value: _showVisualizer,
+                                activeThumbColor: C.black,
+                                activeTrackColor: C.lime,
+                                inactiveThumbColor: C.muted,
+                                inactiveTrackColor: C.surface2,
+                                title: const Text(
+                                  'Show player visualizer',
+                                  style: TextStyle(
+                                    fontFamily: 'DMSansMedium',
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                subtitle: const Text(
+                                  'Show animated bars beside the current track.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                    height: 1.5,
+                                  ),
+                                ),
+                                onChanged: (value) async {
+                                  setState(() => _showVisualizer = value);
+                                  final preferences =
+                                      await SharedPreferences.getInstance();
+                                  await preferences.setBool(
+                                    _visualizerKey,
+                                    value,
+                                  );
+                                },
+                              ),
+                              _settingsSection('LIBRARY'),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text(
+                                  'Refresh library',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                subtitle: const Text(
+                                  'Fetch the latest tracks from Navidrome.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                trailing: const Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: C.muted,
+                                ),
+                                onTap: () {
+                                  setState(() => _showSettings = false);
+                                  _loadLibrary(force: true);
+                                },
+                              ),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text(
+                                  'Server connection',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                subtitle: Text(
+                                  _connected
+                                      ? (_credentials?.baseUrl ?? '')
+                                      : 'Connect to a Navidrome server',
+                                  style: const TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                trailing: const Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: C.muted,
+                                ),
+                                onTap: () {
+                                  setState(() => _showSettings = false);
+                                  _selectTab(AppTab.library);
+                                },
+                              ),
+                              _settingsSection('YOUR DATA'),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text(
+                                  'Clear listening history',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                subtitle: const Text(
+                                  'Remove locally stored listening history and stats.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                trailing: const Icon(
+                                  Icons.close_rounded,
+                                  color: C.danger,
+                                  size: 18,
+                                ),
+                                onTap: () async {
+                                  setState(() {
+                                    _history.clear();
+                                    _showSettings = false;
+                                  });
+                                  final preferences =
+                                      await SharedPreferences.getInstance();
+                                  await preferences.remove(_historyKey);
+                                },
+                              ),
+                              if (_connected)
+                                ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: const Icon(
+                                    Icons.logout_rounded,
+                                    color: C.danger,
+                                    size: 18,
+                                  ),
+                                  title: const Text(
+                                    'Disconnect server',
+                                    style: TextStyle(
+                                      color: C.danger,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  onTap: () {
+                                    setState(() => _showSettings = false);
+                                    _logout();
+                                  },
+                                ),
+                              const SizedBox(height: 12),
+                              const Text(
+                                'Navika · Your listening history stays on this device.',
+                                style: TextStyle(
+                                  color: C.muted,
+                                  fontSize: 9,
+                                  height: 1.6,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -3004,6 +3017,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _playerOverlay() {
     final track = _current!;
+    final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
     final duration =
         _player.duration?.inSeconds.toDouble() ?? track.duration.toDouble();
     final position = _player.position.inSeconds.toDouble();
@@ -3038,7 +3052,7 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Container(
                   height: 70,
-                  padding: const EdgeInsets.symmetric(horizontal: 22),
+                  padding: EdgeInsets.fromLTRB(isMacOS ? 82 : 22, 0, 22, 0),
                   child: Row(
                     children: [
                       IconButton(
