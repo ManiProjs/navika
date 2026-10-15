@@ -1556,10 +1556,35 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 28),
-        _sectionTitle('Quick start'),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Listen now',
+                style: TextStyle(
+                  fontFamily: 'SyneBold',
+                  fontSize: 25,
+                  letterSpacing: -.7,
+                ),
+              ),
+            ),
+            _iconButton(
+              Icons.tune_rounded,
+              tooltip: 'Settings',
+              onTap: () => setState(() => _showSettings = true),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
         LayoutBuilder(
           builder: (context, constraints) {
-            final cardWidth = (constraints.maxWidth - 12) / 2;
+            final columns = constraints.maxWidth >= 900
+                ? 4
+                : constraints.maxWidth >= 520
+                ? 2
+                : 1;
+            final cardWidth =
+                (constraints.maxWidth - (12 * (columns - 1))) / columns;
             final picks = _recommended();
             final recent = _history.reversed
                 .map((event) => _tracksById[event.id])
@@ -1630,6 +1655,92 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           },
         ),
+        _sectionTitle(
+          'Made for you',
+          action: 'See all',
+          onAction: () => _selectTab(AppTab.library),
+        ),
+        if (_libraryLoaded && _mostPlayedAlbums.isNotEmpty)
+          SizedBox(
+            height: 214,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: math.min(8, _mostPlayedAlbums.length),
+              separatorBuilder: (_, _) => const SizedBox(width: 14),
+              itemBuilder: (context, index) {
+                final album = _mostPlayedAlbums[index];
+                return SizedBox(
+                  width: 148,
+                  child: InkWell(
+                    onTap: () => _play(album.track),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _artwork(
+                          album.track.coverArt,
+                          size: 148,
+                          seed: album.album,
+                        ),
+                        const SizedBox(height: 9),
+                        Text(
+                          album.album,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontFamily: 'DMSansBold',
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          album.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: C.muted, fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          )
+        else if (!_libraryLoaded)
+          _card(
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.library_music_outlined,
+                  color: C.lime,
+                  size: 25,
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Open Library to load your collection and personalize these sections.',
+                    style: TextStyle(color: C.muted, fontSize: 12, height: 1.5),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Open Library',
+                  onPressed: () => _selectTab(AppTab.library),
+                  icon: const Icon(Icons.arrow_forward_rounded, color: C.lime),
+                ),
+              ],
+            ),
+          ),
+        _sectionTitle('Recently played'),
+        if (_history.isEmpty)
+          const Text(
+            'Your recently played music will appear here.',
+            style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
+          )
+        else
+          ..._history.reversed.take(5).map((event) {
+            final track = _tracksById[event.id];
+            if (track == null) return const SizedBox.shrink();
+            return _trackRow(track, _history.indexOf(event));
+          }),
         _sectionTitle(
           'Your library at a glance',
           action: 'Browse',
@@ -3026,7 +3137,7 @@ class _HomeScreenState extends State<HomeScreen> {
         duration: _reduceMotion
             ? Duration.zero
             : const Duration(milliseconds: 320),
-        color: _ambientColor(track.coverArt ?? track.album),
+        color: C.bg,
         child: SafeArea(
           child: Column(
             children: [
@@ -3564,18 +3675,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-  }
-
-  Color _ambientColor(String seed) {
-    const colors = [
-      Color(0xFF24321E),
-      Color(0xFF292538),
-      Color(0xFF38281F),
-      Color(0xFF1F3331),
-      Color(0xFF3A2430),
-    ];
-    final tint = colors[seed.hashCode.abs() % colors.length];
-    return Color.lerp(C.bg, tint, .62)!;
   }
 
   Widget _trackRow(MusicTrack track, int index) {
