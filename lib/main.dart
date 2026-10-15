@@ -1859,6 +1859,112 @@ class _HomeScreenState extends State<HomeScreen> {
     return _tracks.where((track) => track.id != _current?.id).toList();
   }
 
+  List<MusicTrack> _tracksFromFavoriteArtists() {
+    final artists = <String, int>{};
+    for (final event in _history) {
+      artists.update(
+        event.artist.toLowerCase(),
+        (count) => count + 1,
+        ifAbsent: () => 1,
+      );
+    }
+    for (final track in _favoriteTracks) {
+      artists.update(
+        track.artist.toLowerCase(),
+        (count) => count + 3,
+        ifAbsent: () => 3,
+      );
+    }
+    final topArtists = artists.keys.toList()
+      ..sort((a, b) => artists[b]!.compareTo(artists[a]!));
+    final playedRecently = _history
+        .skip(math.max(0, _history.length - 8))
+        .map((event) => event.id)
+        .toSet();
+    final picks = _tracks
+        .where(
+          (track) =>
+              topArtists.take(5).contains(track.artist.toLowerCase()) &&
+              !playedRecently.contains(track.id),
+        )
+        .toList();
+    return picks.isNotEmpty ? picks : _recommended();
+  }
+
+  List<MusicTrack> _recentlyPlayedTracks() {
+    final seen = <String>{};
+    return _history.reversed
+        .map((event) => _tracksById[event.id])
+        .whereType<MusicTrack>()
+        .where((track) => seen.add(track.id))
+        .toList();
+  }
+
+  Widget _recommendationShelf(
+    String title,
+    List<MusicTrack> tracks, {
+    String? subtitle,
+  }) {
+    final picks = tracks.take(24).toList();
+    if (picks.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle(
+          title,
+          action: 'Play mix',
+          onAction: () => _play(picks.first, playlist: picks),
+        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 4),
+          Text(subtitle, style: const TextStyle(color: C.muted, fontSize: 11)),
+        ],
+        const SizedBox(height: 13),
+        SizedBox(
+          height: 194,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: picks.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 14),
+            itemBuilder: (context, index) {
+              final track = picks[index];
+              return SizedBox(
+                width: 136,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => _play(track, playlist: picks),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _artwork(track.coverArt, size: 136, seed: track.album),
+                      const SizedBox(height: 8),
+                      Text(
+                        track.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontFamily: 'DMSansBold',
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        track.artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: C.muted, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _searchPage() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2015,16 +2121,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           const SizedBox(height: 26),
-          _sectionTitle(
-            'Recommended for you',
-            action: 'Shuffle',
-            onAction: () {
-              final picks = _recommended();
-              if (picks.isEmpty) return;
-              final shuffled = List<MusicTrack>.from(picks)..shuffle();
-              _play(shuffled.first, playlist: shuffled);
-            },
-          ),
           if (_loading)
             const Center(
               child: Padding(
@@ -2046,13 +2142,35 @@ class _HomeScreenState extends State<HomeScreen> {
               action: 'Refresh',
               onTap: () => _loadLibrary(force: true),
             )
-          else
-            ..._recommended()
-                .take(30)
-                .toList()
-                .asMap()
-                .entries
-                .map((entry) => _trackRow(entry.value, entry.key)),
+          else ...[
+            _recommendationShelf('Made for you', _recommended()),
+            const SizedBox(height: 26),
+            _recommendationShelf(
+              'More from your favorite artists',
+              _tracksFromFavoriteArtists(),
+              subtitle: 'Artists you keep coming back to',
+            ),
+            const SizedBox(height: 26),
+            _recommendationShelf(
+              'Rediscover your rotation',
+              _recentlyPlayedTracks(),
+              subtitle: 'Tracks you have listened to before',
+            ),
+            const SizedBox(height: 26),
+            _recommendationShelf(
+              'Something new for you',
+              _discoveryTracks(),
+              subtitle: 'Familiar sounds, with a little variety',
+            ),
+            if (_favoriteTracks.isNotEmpty) ...[
+              const SizedBox(height: 26),
+              _recommendationShelf(
+                'Your favorites',
+                _favoriteTracks,
+                subtitle: 'The tracks you saved',
+              ),
+            ],
+          ],
           const SizedBox(height: 18),
           _actionButton('Refresh library', onTap: _loadLibrary),
         ],
