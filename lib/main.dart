@@ -3798,7 +3798,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 Expanded(
-                  child: LayoutBuilder(
+                  child: AnimatedSwitcher(
+                    duration: _reduceMotion
+                        ? Duration.zero
+                        : Duration(milliseconds: 220),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: Offset(0.015, 0),
+                          end: Offset.zero,
+                        ).animate(animation),
+                        child: child,
+                      ),
+                    ),
+                    child: LayoutBuilder(
+                      key: ValueKey(_showUpNext),
                     builder: (context, constraints) {
                       final artSize = (constraints.maxWidth * .72).clamp(
                         220.0,
@@ -3806,8 +3823,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
 
                       if (constraints.maxWidth > 680) {
-                        final desktopArtSize = (constraints.maxHeight * .72)
-                            .clamp(260.0, 520.0);
+                        // Keep enough room for the seek bar and controls in
+                        // shorter windows to avoid a bottom RenderFlex overflow.
+                        final desktopArtSize = (constraints.maxHeight * .58)
+                            .clamp(220.0, 390.0);
                         if (_showUpNext) {
                           return Padding(
                             padding: EdgeInsets.fromLTRB(28, 12, 28, 12),
@@ -4633,6 +4652,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       );
                     },
+                    ),
                   ),
                 ),
               ],
