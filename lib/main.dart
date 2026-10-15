@@ -61,6 +61,9 @@ const _visualizerKey = 'navika.playback.visualizer';
 const _shuffleKey = 'navika.playback.shuffle';
 const _repeatAllKey = 'navika.playback.repeat-all';
 const _repeatOneKey = 'navika.playback.repeat-one';
+const _queueKey = 'navika.playback.queue';
+const _recommendationFeedbackKey = 'navika.recommendations.dismissed';
+const _speedKey = 'navika.playback.speed';
 
 enum AppTab { home, search, library, playlists, favorites, stats }
 
@@ -478,7 +481,10 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _username = TextEditingController();
   final TextEditingController _password = TextEditingController();
   Timer? _searchTimer;
+  Timer? _sleepTimer;
   int _searchRequestId = 0;
+  final Set<String> _dismissedRecommendations = {};
+  double _playbackSpeed = 1.0;
 
   AppTab _tab = AppTab.home;
   NavidromeClient? _client;
@@ -746,6 +752,24 @@ class _HomeScreenState extends State<HomeScreen> {
     _shuffle = preferences.getBool(_shuffleKey) ?? false;
     _repeatAll = preferences.getBool(_repeatAllKey) ?? false;
     _repeatOne = preferences.getBool(_repeatOneKey) ?? false;
+    _playbackSpeed = preferences.getDouble(_speedKey) ?? 1.0;
+    _dismissedRecommendations.addAll(
+      preferences.getStringList(_recommendationFeedbackKey) ?? const [],
+    );
+    final savedQueue = preferences.getString(_queueKey);
+    if (savedQueue != null) {
+      try {
+        _queue = (jsonDecode(savedQueue) as List)
+            .map(
+              (item) =>
+                  MusicTrack.fromJson(Map<String, dynamic>.from(item as Map)),
+            )
+            .where((track) => track.id.isNotEmpty)
+            .toList();
+      } catch (_) {
+        await preferences.remove(_queueKey);
+      }
+    }
 
     final history = preferences.getString(_historyKey);
     if (history != null) {
@@ -914,7 +938,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       setState(() {
         _tracks = tracks;
-        if (_queue.isEmpty || _current == null) _queue = tracks;
+        if (_queue.isEmpty) _queue = tracks;
         _libraryLoaded = true;
         _loading = false;
         _connected = true;
@@ -961,6 +985,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
       await _player.setLoopMode(_repeatOne ? LoopMode.one : LoopMode.off);
+      await _player.setSpeed(_playbackSpeed);
       final started = _player.playerStateStream
           .firstWhere((state) => state.playing)
           .timeout(Duration(seconds: 15));
@@ -983,6 +1008,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _error = '';
       });
 
+      unawaited(_saveQueue());
       final event = ListeningEvent(
         id: track.id,
         artist: track.artist,
@@ -1008,6 +1034,253 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() => _error = _describePlaybackError(error));
     }
+  }
+
+  Future<void> _saveQueue() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(
+        _queueKey,
+        jsonEncode(_queue.map((track) => track.toJson()).toList()),
+      );
+    } catch (_) {
+      // Queue persistence is best-effort; playback should never fail because of it.
+    }
+  }
+
+  void _removeFromQueue(int index) {
+    if (index < 0 || index >= _queue.length || index == _queueIndex) return;
+    setState(() {
+      _queue.removeAt(index);
+      if (index < _queueIndex) _queueIndex--;
+    });
+    unawaited(_saveQueue());
+  }
+
+  void _moveQueueItem(int from, int to) {
+    if (from <= _queueIndex ||
+        to <= _queueIndex ||
+        from >= _queue.length ||
+        to >= _queue.length) {
+      return;
+    }
+    setState(() {
+      final item = _queue.removeAt(from);
+      _queue.insert(to, item);
+    });
+    unawaited(_saveQueue());
+  }
+
+  Future<void> _clearUpcoming() async {
+    setState(() {
+      if (_current != null) {
+        _queue = [_current!];
+        _queueIndex = 0;
+      } else {
+        _queue.clear();
+        _queueIndex = 0;
+      }
+    });
+    await _saveQueue();
+  }
+
+  Future<void> _saveQueueAsPlaylist() async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => _NewPlaylistDialog(),
+    );
+    if (name == null || name.trim().isEmpty) return;
+    final ids = _queue.map((track) => track.id).toSet().toList();
+    setState(() => _playlists[name.trim()] = ids);
+    await _savePlaylists();
+  }
+
+  Future<void> _setPlaybackSpeed(double speed) async {
+    setState(() => _playbackSpeed = speed);
+    await _player.setSpeed(speed);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setDouble(_speedKey, speed);
+  }
+
+  void _startSleepTimer() {
+    showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: C.surface,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            Padding(
+              padding: EdgeInsets.all(18),
+              child: Text(
+                'Sleep timer',
+                style: TextStyle(fontFamily: 'SyneBold', fontSize: 20),
+              ),
+            ),
+            for (final minutes in [15, 30, 45, 60, 90])
+              ListTile(
+                title: Text('$minutes minutes'),
+                leading: Icon(Icons.bedtime_outlined),
+                onTap: () => Navigator.pop(context, minutes),
+              ),
+            ListTile(
+              title: Text('Cancel timer'),
+              leading: Icon(Icons.timer_off_outlined),
+              onTap: () => Navigator.pop(context, 0),
+            ),
+          ],
+        ),
+      ),
+    ).then((minutes) {
+      if (minutes == null) return;
+      _sleepTimer?.cancel();
+      if (minutes == 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('Sleep timer cancelled')));
+        }
+        return;
+      }
+      _sleepTimer = Timer(Duration(minutes: minutes), () {
+        unawaited(_player.pause());
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Playback paused by sleep timer')),
+          );
+        }
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sleep timer set for $minutes minutes')),
+        );
+      }
+    });
+  }
+
+  Future<void> _dismissRecommendation(MusicTrack track) async {
+    setState(() => _dismissedRecommendations.add(track.id));
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setStringList(
+      _recommendationFeedbackKey,
+      _dismissedRecommendations.toList(),
+    );
+  }
+
+  Future<void> _showCollectionDetails({
+    required String title,
+    required String subtitle,
+    required List<MusicTrack> tracks,
+  }) async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: C.surface,
+      builder: (context) => SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: .88,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(20, 18, 20, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: TextStyle(fontFamily: 'SyneBold', fontSize: 25),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                Text(subtitle, style: TextStyle(color: C.muted, fontSize: 12)),
+                SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${tracks.length} tracks',
+                        style: TextStyle(color: C.muted, fontSize: 12),
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: tracks.isEmpty
+                          ? null
+                          : () {
+                              Navigator.pop(context);
+                              _play(tracks.first, playlist: tracks);
+                            },
+                      icon: Icon(Icons.play_arrow_rounded),
+                      label: Text('Play all'),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 8),
+                Expanded(
+                  child: ListView(
+                    children: tracks
+                        .asMap()
+                        .entries
+                        .map((entry) => _trackRow(entry.value, entry.key))
+                        .toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openAlbum(MusicTrack track) {
+    final matches =
+        _tracks
+            .where(
+              (item) =>
+                  item.album.toLowerCase() == track.album.toLowerCase() &&
+                  item.artist.toLowerCase() == track.artist.toLowerCase(),
+            )
+            .toList()
+          ..sort(
+            (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+          );
+    unawaited(
+      _showCollectionDetails(
+        title: track.album,
+        subtitle: track.artist,
+        tracks: matches,
+      ),
+    );
+  }
+
+  void _openArtist(MusicTrack track) {
+    final matches =
+        _tracks
+            .where(
+              (item) => item.artist.toLowerCase() == track.artist.toLowerCase(),
+            )
+            .toList()
+          ..sort((a, b) {
+            final albumOrder = a.album.toLowerCase().compareTo(
+              b.album.toLowerCase(),
+            );
+            return albumOrder != 0
+                ? albumOrder
+                : a.title.toLowerCase().compareTo(b.title.toLowerCase());
+          });
+    unawaited(
+      _showCollectionDetails(
+        title: track.artist,
+        subtitle:
+            'Artist · ${matches.map((item) => item.album).toSet().length} albums',
+        tracks: matches,
+      ),
+    );
   }
 
   void _seekTo(Offset globalPosition, double durationSeconds) {
@@ -1220,6 +1493,30 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
             ListTile(
+              leading: Icon(Icons.person_outline_rounded),
+              title: Text('Open artist'),
+              onTap: () {
+                Navigator.pop(context);
+                _openArtist(track);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.album_outlined),
+              title: Text('Open album'),
+              onTap: () {
+                Navigator.pop(context);
+                _openAlbum(track);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.thumb_down_outlined),
+              title: Text('Show me less like this'),
+              onTap: () {
+                Navigator.pop(context);
+                _dismissRecommendation(track);
+              },
+            ),
+            ListTile(
               leading: Icon(Icons.play_arrow_rounded),
               title: Text('Play now'),
               onTap: () {
@@ -1236,6 +1533,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _searchTimer?.cancel();
+    _sleepTimer?.cancel();
     for (final subscription in _playerSubscriptions) {
       unawaited(subscription.cancel());
     }
@@ -1634,6 +1932,30 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    if (_libraryError.isNotEmpty) {
+      return _emptyState(
+        'Could not load your library',
+        _libraryError,
+        action: 'Retry',
+        onTap: () => _loadLibrary(force: true),
+      );
+    }
+
+    if (!_libraryLoaded && _loading) {
+      return Padding(
+        padding: EdgeInsets.symmetric(vertical: 64),
+        child: Center(
+          child: Column(
+            children: [
+              CircularProgressIndicator(color: C.lime),
+              SizedBox(height: 14),
+              Text('Loading your music…', style: TextStyle(color: C.muted)),
+            ],
+          ),
+        ),
+      );
+    }
+
     if (_libraryLoaded && _tracks.isEmpty) {
       return _emptyState(
         'No tracks found',
@@ -1929,7 +2251,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<MusicTrack> _recommended() {
     return recommendTracks(
-      _tracks,
+      _tracks
+          .where((track) => !_dismissedRecommendations.contains(track.id))
+          .toList(),
       _history,
       currentId: _current?.id,
       favoriteIds: _favorites.toSet(),
@@ -1950,7 +2274,13 @@ class _HomeScreenState extends State<HomeScreen> {
         )
         .toList();
     if (picks.isNotEmpty) return picks;
-    return _tracks.where((track) => track.id != _current?.id).toList();
+    return _tracks
+        .where(
+          (track) =>
+              track.id != _current?.id &&
+              !_dismissedRecommendations.contains(track.id),
+        )
+        .toList();
   }
 
   List<MusicTrack> _tracksFromFavoriteArtists() {
@@ -1999,7 +2329,10 @@ class _HomeScreenState extends State<HomeScreen> {
     List<MusicTrack> tracks, {
     String? subtitle,
   }) {
-    final picks = tracks.take(24).toList();
+    final picks = tracks
+        .where((track) => !_dismissedRecommendations.contains(track.id))
+        .take(24)
+        .toList();
     if (picks.isEmpty) return SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2027,6 +2360,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: InkWell(
                   borderRadius: BorderRadius.circular(10),
                   onTap: () => _play(track, playlist: picks),
+                  onLongPress: () => _showTrackMenu(track),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -2103,7 +2437,12 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: () => _selectTab(AppTab.library),
           )
         else if (_searchError.isNotEmpty)
-          _emptyState('Search unavailable', _searchError)
+          _emptyState(
+            'Search unavailable',
+            _searchError,
+            action: 'Retry search',
+            onTap: () => _runSearch(_search.text),
+          )
         else if (_searching)
           Center(
             child: Padding(
@@ -2441,6 +2780,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                           IconButton(
+                            tooltip: 'Rename playlist',
+                            onPressed: () => _renamePlaylist(entry.key),
+                            icon: Icon(Icons.edit_outlined),
+                          ),
+                          IconButton(
                             tooltip: 'Play playlist',
                             onPressed: tracks.isEmpty
                                 ? null
@@ -2485,6 +2829,52 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ],
     );
+  }
+
+  Future<void> _renamePlaylist(String oldName) async {
+    final controller = TextEditingController(text: oldName);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: C.surface,
+        title: Text('Rename playlist'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(hintText: 'Playlist name'),
+          onSubmitted: (value) {
+            if (value.trim().isNotEmpty) Navigator.pop(context, value.trim());
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (controller.text.trim().isNotEmpty) {
+                Navigator.pop(context, controller.text.trim());
+              }
+            },
+            child: Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (newName == null || newName == oldName || !mounted) return;
+    if (_playlists.containsKey(newName)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('A playlist with that name already exists.')),
+      );
+      return;
+    }
+    setState(() {
+      final tracks = _playlists.remove(oldName);
+      if (tracks != null) _playlists[newName] = tracks;
+    });
+    await _savePlaylists();
   }
 
   Future<void> _chooseTrackForPlaylist(String playlist) async {
@@ -3071,6 +3461,55 @@ class _HomeScreenState extends State<HomeScreen> {
                                 },
                               ),
                               _settingsSection('PLAYBACK'),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  'Playback speed',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                subtitle: Text(
+                                  'Currently ${_playbackSpeed.toStringAsFixed(2).replaceAll(RegExp(r'0+$'), '').replaceAll(RegExp(r'\.$'), '')}×',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                trailing: DropdownButton<double>(
+                                  value: _playbackSpeed,
+                                  items: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+                                      .map(
+                                        (speed) => DropdownMenuItem(
+                                          value: speed,
+                                          child: Text('$speed×'),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (speed) {
+                                    if (speed != null) {
+                                      unawaited(_setPlaybackSpeed(speed));
+                                    }
+                                  },
+                                ),
+                              ),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  'Sleep timer',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                subtitle: Text(
+                                  'Pause playback after a set time.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                trailing: Icon(
+                                  Icons.bedtime_outlined,
+                                  color: C.muted,
+                                ),
+                                onTap: _startSleepTimer,
+                              ),
                               SwitchListTile(
                                 contentPadding: EdgeInsets.zero,
                                 value: _autoAdvance,
@@ -3537,13 +3976,15 @@ class _HomeScreenState extends State<HomeScreen> {
                                               ),
                                             ),
                                           ),
+                                          IconButton(
+                                            tooltip: 'Close Up Next',
+                                            onPressed: () => setState(
+                                              () => _showUpNext = false,
+                                            ),
+                                            icon: Icon(Icons.close_rounded),
+                                          ),
                                           TextButton(
-                                            onPressed: () => setState(() {
-                                              _queue
-                                                ..clear()
-                                                ..add(track);
-                                              _queueIndex = 0;
-                                            }),
+                                            onPressed: _clearUpcoming,
                                             child: Text('Clear'),
                                           ),
                                         ],
@@ -3683,23 +4124,29 @@ class _HomeScreenState extends State<HomeScreen> {
                                         ),
                                       ),
                                       SizedBox(height: 7),
-                                      Text(
-                                        track.artist,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: C.muted,
-                                          fontSize: 14,
+                                      InkWell(
+                                        onTap: () => _openArtist(track),
+                                        child: Text(
+                                          track.artist,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: C.muted,
+                                            fontSize: 14,
+                                          ),
                                         ),
                                       ),
                                       SizedBox(height: 4),
-                                      Text(
-                                        track.album,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: C.muted,
-                                          fontSize: 11,
+                                      InkWell(
+                                        onTap: () => _openAlbum(track),
+                                        child: Text(
+                                          track.album,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: C.muted,
+                                            fontSize: 11,
+                                          ),
                                         ),
                                       ),
                                       if (_showVisualizer) ...[
@@ -3860,22 +4307,111 @@ class _HomeScreenState extends State<HomeScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             if (_showUpNext) ...[
-                              _sectionTitle(
-                                'Up next',
-                                action: 'Show artwork',
-                                onAction: () =>
-                                    setState(() => _showUpNext = false),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'Up next',
+                                      style: TextStyle(
+                                        fontFamily: 'SyneBold',
+                                        fontSize: 22,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Close Up Next',
+                                    onPressed: () =>
+                                        setState(() => _showUpNext = false),
+                                    icon: Icon(Icons.close_rounded),
+                                  ),
+                                  PopupMenuButton<String>(
+                                    onSelected: (value) {
+                                      if (value == 'clear') _clearUpcoming();
+                                      if (value == 'save') {
+                                        _saveQueueAsPlaylist();
+                                      }
+                                    },
+                                    itemBuilder: (_) => [
+                                      PopupMenuItem(
+                                        value: 'clear',
+                                        child: Text('Clear upcoming tracks'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'save',
+                                        child: Text('Save queue as playlist'),
+                                      ),
+                                    ],
+                                    icon: Icon(Icons.more_vert_rounded),
+                                  ),
+                                ],
                               ),
                               ..._queue
-                                  .skip(_queueIndex + 1)
-                                  .take(20)
-                                  .toList()
                                   .asMap()
                                   .entries
+                                  .where((entry) => entry.key > _queueIndex)
+                                  .take(100)
                                   .map(
-                                    (entry) => _trackRow(
-                                      entry.value,
-                                      _queueIndex + entry.key + 1,
+                                    (entry) => ListTile(
+                                      dense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                      leading: _artwork(
+                                        entry.value.coverArt,
+                                        size: 42,
+                                        seed: entry.value.album,
+                                      ),
+                                      title: Text(
+                                        entry.value.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      subtitle: Text(
+                                        '${entry.value.artist} · ${entry.value.album}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      onTap: () => _play(entry.value),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            tooltip: 'Move up',
+                                            onPressed:
+                                                entry.key > _queueIndex + 1
+                                                ? () => _moveQueueItem(
+                                                    entry.key,
+                                                    entry.key - 1,
+                                                  )
+                                                : null,
+                                            icon: Icon(
+                                              Icons.arrow_upward_rounded,
+                                              size: 17,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Move down',
+                                            onPressed:
+                                                entry.key < _queue.length - 1
+                                                ? () => _moveQueueItem(
+                                                    entry.key,
+                                                    entry.key + 1,
+                                                  )
+                                                : null,
+                                            icon: Icon(
+                                              Icons.arrow_downward_rounded,
+                                              size: 17,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Remove from queue',
+                                            onPressed: () =>
+                                                _removeFromQueue(entry.key),
+                                            icon: Icon(
+                                              Icons.close_rounded,
+                                              size: 18,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                               if (_queueIndex >= _queue.length - 1)
@@ -3920,25 +4456,37 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                         ),
                                         SizedBox(height: 6),
-                                        Text(
-                                          track.artist,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            color: C.muted,
-                                            fontSize: 13,
+                                        InkWell(
+                                          onTap: () => _openArtist(track),
+                                          child: Text(
+                                            track.artist,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: C.muted,
+                                              fontSize: 13,
+                                              decoration:
+                                                  TextDecoration.underline,
+                                              decorationColor: C.border,
+                                            ),
                                           ),
                                         ),
                                         SizedBox(height: 4),
-                                        Text(
-                                          track.album,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            color: C.muted,
-                                            fontSize: 11,
+                                        InkWell(
+                                          onTap: () => _openAlbum(track),
+                                          child: Text(
+                                            track.album,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: C.muted,
+                                              fontSize: 11,
+                                              decoration:
+                                                  TextDecoration.underline,
+                                              decorationColor: C.border,
+                                            ),
                                           ),
                                         ),
                                         if (_showVisualizer) ...[
@@ -4151,11 +4699,39 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   SizedBox(height: 4),
-                  Text(
-                    '${track.artist} · ${track.album}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: C.muted, fontSize: 11),
+                  Wrap(
+                    spacing: 5,
+                    children: [
+                      InkWell(
+                        onTap: () => _openArtist(track),
+                        child: Text(
+                          track.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: C.muted,
+                            fontSize: 11,
+                            decoration: TextDecoration.underline,
+                            decorationColor: C.border,
+                          ),
+                        ),
+                      ),
+                      Text('·', style: TextStyle(color: C.muted, fontSize: 11)),
+                      InkWell(
+                        onTap: () => _openAlbum(track),
+                        child: Text(
+                          track.album,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: C.muted,
+                            fontSize: 11,
+                            decoration: TextDecoration.underline,
+                            decorationColor: C.border,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
