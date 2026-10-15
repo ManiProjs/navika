@@ -26,5 +26,14 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()
+
+    // Keep the native traffic lights aligned with Navika's taller custom
+    // title bar while preserving their standard horizontal spacing.
+    for buttonType in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+      guard let button = standardWindowButton(buttonType) else { continue }
+      var buttonFrame = button.frame
+      buttonFrame.origin.y -= 13
+      button.frame = buttonFrame
+    }
   }
 }

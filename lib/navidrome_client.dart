@@ -135,7 +135,7 @@ class NavidromeClient {
       't': token,
       's': salt,
       'v': '1.16.1',
-      'c': 'CrossNavika',
+      'c': 'Navika',
       'f': 'json',
     };
   }

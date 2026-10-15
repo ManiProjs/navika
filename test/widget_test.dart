@@ -15,7 +15,7 @@ void main() {
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const CrossNavikaApp());
+    await tester.pumpWidget(const NavikaApp());
     await tester.pump();
 
     expect(find.text('Home'), findsWidgets);
@@ -27,7 +27,7 @@ void main() {
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const CrossNavikaApp());
+    await tester.pumpWidget(const NavikaApp());
     await tester.pump();
 
     await tester.tap(find.text('Search').last);

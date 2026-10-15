@@ -2,16 +2,26 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'navidrome_client.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const CrossNavikaApp());
+  if (defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS) {
+    await JustAudioBackground.init(
+      androidNotificationChannelId: 'app.navika.audio',
+      androidNotificationChannelName: 'Navika playback',
+      androidNotificationOngoing: true,
+    );
+  }
+  runApp(const NavikaApp());
 }
 
 abstract final class C {
@@ -56,8 +66,8 @@ extension AppTabInfo on AppTab {
   };
 }
 
-class CrossNavikaApp extends StatelessWidget {
-  const CrossNavikaApp({super.key});
+class NavikaApp extends StatelessWidget {
+  const NavikaApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -469,6 +479,48 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }),
     );
+
+    _playerSubscriptions.add(
+      _player.errorStream.listen((error) {
+        if (!mounted) return;
+        setState(() => _error = _describePlaybackError(error));
+      }),
+    );
+  }
+
+  String _describePlaybackError(Object error) {
+    final details = error.toString();
+    final normalized = details.toLowerCase();
+
+    if (normalized.contains('cleartext') ||
+        normalized.contains('clear text traffic')) {
+      return 'Android blocked the HTTP audio stream. Rebuild and reinstall Navika with the latest version, then try again.';
+    }
+    if (normalized.contains('socketexception') ||
+        normalized.contains('failed host lookup') ||
+        normalized.contains('connection refused') ||
+        normalized.contains('network is unreachable')) {
+      return 'Could not reach the music server. Check that your device is connected to the same network and the server is online.';
+    }
+    if (normalized.contains('401') ||
+        normalized.contains('403') ||
+        normalized.contains('unauthorized') ||
+        normalized.contains('forbidden')) {
+      return 'The server rejected the audio request. Check your Navidrome login and server permissions.';
+    }
+    if (normalized.contains('404') || normalized.contains('not found')) {
+      return 'This track could not be found on the server. Refresh your library and try another track.';
+    }
+    if (normalized.contains('timeout') || normalized.contains('timed out')) {
+      return 'The audio request timed out. Check your connection and try again.';
+    }
+    if (normalized.contains('format') ||
+        normalized.contains('decoder') ||
+        normalized.contains('unsupported')) {
+      return 'Navika could not decode this audio format. Try another track or check the file on your server.';
+    }
+
+    return 'Playback failed: $details';
   }
 
   Future<void> _advanceAfterCompletion() async {
@@ -503,6 +555,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, MusicTrack> get _tracksById => {
     for (final track in _tracks) track.id: track,
   };
+
+  int get _albumCount => _tracks
+      .map(
+        (track) =>
+            '${track.album.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}',
+      )
+      .toSet()
+      .length;
 
   List<MusicTrack> get _favoriteTracks =>
       _favorites.map((id) => _tracksById[id]).whereType<MusicTrack>().toList();
@@ -674,10 +734,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _error = restoreWarnings.join(' ');
       });
 
-      // Home depends on the library for its recommendations and statistics.
-      // Restore it on startup just as we do when the user opens Library.
-      unawaited(_loadLibrary());
-
       if (mounted && restoreWarnings.isNotEmpty) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(restoreWarnings.join(' '))));
@@ -805,7 +861,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      await _player.setUrl(client.streamUrl(track.id));
+      await _player.setAudioSource(
+        AudioSource.uri(
+          Uri.parse(client.streamUrl(track.id)),
+          tag: MediaItem(
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            duration: Duration(seconds: track.duration),
+            artUri: client.coverArtUrl(track.coverArt) == null
+                ? null
+                : Uri.parse(client.coverArtUrl(track.coverArt)!),
+          ),
+        ),
+      );
       await _player.setLoopMode(_repeatOne ? LoopMode.one : LoopMode.off);
       final started = _player.playerStateStream
           .firstWhere((state) => state.playing)
@@ -813,7 +883,7 @@ class _HomeScreenState extends State<HomeScreen> {
       unawaited(
         _player.play().catchError((Object error) {
           if (mounted) {
-            setState(() => _error = 'Could not play this track: $error');
+            setState(() => _error = _describePlaybackError(error));
           }
         }),
       );
@@ -852,7 +922,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = 'Could not play this track: $error');
+      setState(() => _error = _describePlaybackError(error));
     }
   }
 
@@ -882,7 +952,7 @@ class _HomeScreenState extends State<HomeScreen> {
         unawaited(
           _player.play().catchError((Object error) {
             if (mounted) {
-              setState(() => _error = 'Could not resume playback: $error');
+              setState(() => _error = _describePlaybackError(error));
             }
           }),
         );
@@ -1113,7 +1183,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (!isDesktop) _tabBar(),
                 ],
               ),
-              if (_showSettings) _settingsOverlay(),
+              // Keep settings mounted while closed so its slide transition
+              // can animate both when opening and when dismissing.
+              _settingsOverlay(isMobile: !isDesktop),
               // Keep the player mounted so its open/close transition can run,
               // but make the hidden layer transparent to taps.
               if (_current != null)
@@ -1142,12 +1214,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               // Keep the custom app titlebar above the player overlay so it
               // remains visible and interactive while the player is open.
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: _topBar(isDesktop: isDesktop, isMacOS: isMacOS),
-              ),
+              if (isDesktop || !_showSettings)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: _topBar(isDesktop: isDesktop, isMacOS: isMacOS),
+                ),
             ],
           ),
         ),
@@ -1461,15 +1534,6 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    if (_loading) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: CircularProgressIndicator(color: C.lime),
-        ),
-      );
-    }
-
     if (_libraryLoaded && _tracks.isEmpty) {
       return _emptyState(
         'No tracks found',
@@ -1532,9 +1596,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 Icons.shuffle_rounded,
                 background: C.lime,
                 foreground: C.black,
-                // A library can be empty while a connection is being restored.
+                // Loading the library is intentionally deferred until Library
+                // is opened; don't silently fetch the entire collection here.
                 onTap: () {
-                  if (_tracks.isEmpty) return;
+                  if (_tracks.isEmpty) {
+                    _selectTab(AppTab.library);
+                    return;
+                  }
                   final tracks = List<MusicTrack>.from(_tracks)..shuffle();
                   _play(tracks.first, playlist: tracks);
                 },
@@ -1549,18 +1617,22 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         Row(
           children: [
-            Expanded(child: _homeStat('${_tracks.length}', 'TRACKS')),
-            const SizedBox(width: 10),
             Expanded(
               child: _homeStat(
-                '${_tracks.map((t) => '${t.album}::${t.artist}').toSet().length}',
-                'ALBUMS',
+                _libraryLoaded ? '${_tracks.length}' : '—',
+                'TRACKS',
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
+              child: _homeStat(_libraryLoaded ? '$_albumCount' : '—', 'ALBUMS'),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
               child: _homeStat(
-                '${_tracks.map((t) => t.artist).toSet().length}',
+                _libraryLoaded
+                    ? '${_tracks.map((t) => t.artist).toSet().length}'
+                    : '—',
                 'ARTISTS',
               ),
             ),
@@ -1568,6 +1640,30 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 28),
         _sectionTitle('Your most played albums'),
+        if (!_libraryLoaded)
+          _card(
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.library_music_outlined,
+                  color: C.lime,
+                  size: 25,
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Open Library to load your collection and personalize these sections.',
+                    style: TextStyle(color: C.muted, fontSize: 12, height: 1.5),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Open Library',
+                  onPressed: () => _selectTab(AppTab.library),
+                  icon: const Icon(Icons.arrow_forward_rounded, color: C.lime),
+                ),
+              ],
+            ),
+          ),
         if (_mostPlayedAlbums.isEmpty)
           _emptyState(
             'Your favorites will show up here',
@@ -1905,12 +2001,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(width: 10),
-              Expanded(
-                child: _homeStat(
-                  '${_tracks.map((t) => t.album).toSet().length}',
-                  'ALBUMS',
-                ),
-              ),
+              Expanded(child: _homeStat('$_albumCount', 'ALBUMS')),
             ],
           ),
           const SizedBox(height: 26),
@@ -2206,35 +2297,36 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _playlistTrackRow(String playlist, MusicTrack track, int index) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: C.border)),
+    final active = _current?.id == track.id;
+    return InkWell(
+      onTap: () => _play(
+        track,
+        playlist: _playlists[playlist]!
+            .map((id) => _tracksById[id])
+            .whereType<MusicTrack>()
+            .toList(),
       ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 24,
-            child: Text(
-              '${index + 1}'.padLeft(2, '0'),
-              style: const TextStyle(color: C.muted, fontSize: 10),
-            ),
-          ),
-          const SizedBox(width: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: _artwork(track.coverArt, size: 38, seed: track.album),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: InkWell(
-              onTap: () => _play(
-                track,
-                playlist: _playlists[playlist]!
-                    .map((id) => _tracksById[id])
-                    .whereType<MusicTrack>()
-                    .toList(),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 22,
+              child: Text(
+                active ? '♫' : '${index + 1}',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: active ? C.lime : C.muted,
+                  fontFamily: 'DMSansMedium',
+                  fontSize: 11,
+                ),
               ),
+            ),
+            const SizedBox(width: 10),
+            _artwork(track.coverArt, size: 46, seed: track.album),
+            const SizedBox(width: 12),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -2242,40 +2334,42 @@ class _HomeScreenState extends State<HomeScreen> {
                     track.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 12,
+                    style: TextStyle(
+                      color: active ? C.lime : C.text,
                       fontFamily: 'DMSansMedium',
+                      fontSize: 13,
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
                     '${track.artist} · ${track.album}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: C.muted, fontSize: 10),
+                    style: const TextStyle(color: C.muted, fontSize: 11),
                   ),
                 ],
               ),
             ),
-          ),
-          Text(
-            _formatTime(track.duration.toDouble()),
-            style: const TextStyle(color: C.muted, fontSize: 10),
-          ),
-          IconButton(
-            tooltip: 'Remove from playlist',
-            visualDensity: VisualDensity.compact,
-            onPressed: () async {
-              setState(() => _playlists[playlist]!.remove(track.id));
-              await _savePlaylists();
-            },
-            icon: const Icon(
-              Icons.remove_circle_outline_rounded,
-              size: 18,
-              color: C.muted,
+            const SizedBox(width: 8),
+            Text(
+              _formatTime(track.duration.toDouble()),
+              style: const TextStyle(color: C.muted, fontSize: 10),
             ),
-          ),
-        ],
+            IconButton(
+              tooltip: 'Remove from playlist',
+              visualDensity: VisualDensity.compact,
+              onPressed: () async {
+                setState(() => _playlists[playlist]!.remove(track.id));
+                await _savePlaylists();
+              },
+              icon: const Icon(
+                Icons.remove_circle_outline_rounded,
+                size: 20,
+                color: C.muted,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2312,7 +2406,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _statsPage() {
-    final albums = _tracks.map((track) => track.album).toSet().length;
+    final albums = _albumCount;
     final artists = _tracks.map((track) => track.artist).toSet().length;
 
     return Column(
@@ -2332,16 +2426,36 @@ class _HomeScreenState extends State<HomeScreen> {
           style: TextStyle(color: C.muted, fontSize: 13, height: 1.6),
         ),
         const SizedBox(height: 20),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            _statCard('${_tracks.length}', 'TRACKS IN LIBRARY'),
-            _statCard('$albums', 'ALBUMS'),
-            _statCard('$artists', 'ARTISTS'),
-            _statCard('${_history.length}', 'RECORDED PLAYS'),
-            _statCard('${_favorites.length}', 'FAVORITES'),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const spacing = 10.0;
+            final columns = constraints.maxWidth >= 900 ? 3 : 2;
+            final cardWidth =
+                (constraints.maxWidth - spacing * (columns - 1)) / columns;
+            return Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: [
+                _statCard(
+                  '${_tracks.length}',
+                  'TRACKS IN LIBRARY',
+                  width: cardWidth,
+                ),
+                _statCard('$albums', 'ALBUMS', width: cardWidth),
+                _statCard('$artists', 'ARTISTS', width: cardWidth),
+                _statCard(
+                  '${_history.length}',
+                  'RECORDED PLAYS',
+                  width: cardWidth,
+                ),
+                _statCard(
+                  '${_favorites.length}',
+                  'FAVORITES',
+                  width: cardWidth,
+                ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 28),
         _sectionTitle('Most played albums'),
@@ -2557,53 +2671,63 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _settingsOverlay() {
+  Widget _settingsOverlay({required bool isMobile}) {
     final duration = _reduceMotion
         ? Duration.zero
-        : const Duration(milliseconds: 240);
+        : const Duration(milliseconds: 280);
     return Positioned.fill(
       child: IgnorePointer(
         ignoring: !_showSettings,
-        child: AnimatedOpacity(
-          opacity: _showSettings ? 1 : 0,
+        child: AnimatedSlide(
+          offset: _showSettings
+              ? Offset.zero
+              : (isMobile ? const Offset(1, 0) : const Offset(0.08, -0.02)),
           duration: duration,
-          child: Material(
-            color: const Color(0x99000000),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: GestureDetector(
-                    onTap: () => setState(() => _showSettings = false),
-                    child: const SizedBox.expand(),
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.topRight,
-                  child: AnimatedSlide(
-                    offset: _showSettings
-                        ? Offset.zero
-                        : const Offset(0.08, -0.02),
-                    duration: duration,
-                    curve: Curves.easeOutCubic,
+          curve: Curves.easeOutCubic,
+          child: AnimatedOpacity(
+            opacity: _showSettings ? 1 : 0,
+            duration: duration,
+            child: Material(
+              color: isMobile ? C.bg : const Color(0x99000000),
+              child: Stack(
+                children: [
+                  if (!isMobile)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _showSettings = false),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  Align(
+                    alignment: isMobile ? Alignment.center : Alignment.topRight,
                     child: Container(
-                      width: 390,
-                      constraints: BoxConstraints(
-                        maxWidth: MediaQuery.sizeOf(context).width - 28,
-                        maxHeight: MediaQuery.sizeOf(context).height - 100,
-                      ),
-                      margin: const EdgeInsets.only(
-                        top: 68,
-                        right: 14,
-                        left: 14,
-                      ),
-                      padding: const EdgeInsets.all(18),
+                      width: isMobile ? double.infinity : 390,
+                      height: isMobile ? double.infinity : null,
+                      constraints: isMobile
+                          ? const BoxConstraints.expand()
+                          : BoxConstraints(
+                              maxWidth: MediaQuery.sizeOf(context).width - 28,
+                              maxHeight:
+                                  MediaQuery.sizeOf(context).height - 100,
+                            ),
+                      margin: isMobile
+                          ? EdgeInsets.zero
+                          : const EdgeInsets.only(top: 68, right: 14, left: 14),
+                      padding: EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                        color: C.surface,
-                        border: Border.all(color: C.border),
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: const [
-                          BoxShadow(color: Color(0x4D000000), blurRadius: 24),
-                        ],
+                        color: isMobile ? null : C.surface,
+                        border: isMobile ? null : Border.all(color: C.border),
+                        borderRadius: isMobile
+                            ? BorderRadius.zero
+                            : BorderRadius.circular(18),
+                        boxShadow: isMobile
+                            ? null
+                            : const [
+                                BoxShadow(
+                                  color: Color(0x4D000000),
+                                  blurRadius: 24,
+                                ),
+                              ],
                       ),
                       child: SingleChildScrollView(
                         child: Column(
@@ -2843,8 +2967,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -2869,7 +2993,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _playerOverlay() {
     final track = _current!;
-    final platform = Theme.of(context).platform;
     final duration =
         _player.duration?.inSeconds.toDouble() ?? track.duration.toDouble();
     final position = _player.position.inSeconds.toDouble();
@@ -2889,12 +3012,7 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Container(
                 height: 70,
-                padding: EdgeInsets.fromLTRB(
-                  platform == TargetPlatform.macOS ? 210 : 22,
-                  0,
-                  22,
-                  0,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 22),
                 child: Row(
                   children: [
                     IconButton(
@@ -3717,11 +3835,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _statCard(String value, String label) {
-    return SizedBox(
-      width: (MediaQuery.sizeOf(context).width - 54) / 2,
-      child: _homeStat(value, label),
-    );
+  Widget _statCard(String value, String label, {required double width}) {
+    return SizedBox(width: width, child: _homeStat(value, label));
   }
 
   Widget _fieldLabel(String label) {
