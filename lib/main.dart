@@ -641,6 +641,22 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final track in _tracks) track.id: track,
   };
 
+  List<MusicTrack> _mergeLibraryTracks(Iterable<MusicTrack> tracks) {
+    final unique = <String, MusicTrack>{};
+    for (final track in tracks) {
+      if (track.id.isNotEmpty) unique[track.id] = track;
+    }
+    return unique.values.toList()..sort((a, b) {
+      final artistOrder = a.artist.toLowerCase().compareTo(
+        b.artist.toLowerCase(),
+      );
+      if (artistOrder != 0) return artistOrder;
+      final albumOrder = a.album.toLowerCase().compareTo(b.album.toLowerCase());
+      if (albumOrder != 0) return albumOrder;
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+    });
+  }
+
   int get _albumCount => _tracks
       .map(
         (track) =>
@@ -703,7 +719,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!mounted || requestId != _searchRequestId) return;
         setState(() {
           final normalized = query.toLowerCase();
-          _searchResults = [
+          _searchResults = _mergeLibraryTracks([
             ...results,
             ..._localTracks.where(
               (track) =>
@@ -711,7 +727,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   track.artist.toLowerCase().contains(normalized) ||
                   track.album.toLowerCase().contains(normalized),
             ),
-          ];
+          ]);
           _searching = false;
         });
       } catch (error) {
@@ -794,9 +810,8 @@ class _HomeScreenState extends State<HomeScreen> {
       try {
         _localTracks = (jsonDecode(savedLocalTracks) as List)
             .map(
-              (item) => MusicTrack.fromJson(
-                Map<String, dynamic>.from(item as Map),
-              ),
+              (item) =>
+                  MusicTrack.fromJson(Map<String, dynamic>.from(item as Map)),
             )
             .where((track) => track.isLocal)
             .toList();
@@ -1002,7 +1017,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
 
       setState(() {
-        _tracks = [...tracks, ..._localTracks];
+        _tracks = _mergeLibraryTracks([...tracks, ..._localTracks]);
         if (_queue.isEmpty) _queue = tracks;
         _libraryLoaded = true;
         _loading = false;
@@ -1061,7 +1076,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() {
         _localTracks = localTracks;
-        _tracks = [..._tracks.where((track) => !track.isLocal), ...localTracks];
+        _tracks = _mergeLibraryTracks([
+          ..._tracks.where((track) => !track.isLocal),
+          ...localTracks,
+        ]);
         _libraryLoaded = true;
         _showLogin = false;
       });
@@ -1070,9 +1088,9 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not import music: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not import music: $error')));
     }
   }
 
@@ -1163,9 +1181,14 @@ class _HomeScreenState extends State<HomeScreen> {
         for (final track in discovered.values) track.id: track,
       };
       final updated = merged.values.toList()
-        ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
-      final changed = updated.length != _localTracks.length ||
-          !updated.every((track) => _localTracks.any((old) => old.id == track.id));
+        ..sort(
+          (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+        );
+      final changed =
+          updated.length != _localTracks.length ||
+          !updated.every(
+            (track) => _localTracks.any((old) => old.id == track.id),
+          );
       if (changed) {
         final preferences = await SharedPreferences.getInstance();
         await preferences.setString(
@@ -1175,7 +1198,10 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) {
           setState(() {
             _localTracks = updated;
-            _tracks = [..._tracks.where((track) => !track.isLocal), ...updated];
+            _tracks = _mergeLibraryTracks([
+              ..._tracks.where((track) => !track.isLocal),
+              ...updated,
+            ]);
             _libraryLoaded = _connected ? _libraryLoaded : updated.isNotEmpty;
           });
         }
@@ -2766,6 +2792,12 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: _importLocalFolder,
               icon: Icon(Icons.create_new_folder_outlined, color: C.lime),
             ),
+            if (!_connected && _localTracks.isNotEmpty)
+              IconButton(
+                tooltip: 'Connect Navidrome',
+                onPressed: () => setState(() => _showLogin = !_showLogin),
+                icon: Icon(Icons.dns_outlined, color: C.lime),
+              ),
             if (_connected)
               IconButton(
                 onPressed: _logout,
@@ -2774,9 +2806,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         SizedBox(height: 24),
-        if (_showLogin || !_connected)
+        if (!_connected && _localTracks.isEmpty)
           _loginCard()
         else ...[
+          if (_showLogin && !_connected) ...[
+            _loginCard(),
+            SizedBox(height: 18),
+          ],
+          if (_connected) ...[
           _card(
             child: Row(
               children: [
@@ -2810,9 +2847,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           SizedBox(height: 12),
+          ],
           Row(
             children: [
-              Expanded(child: _homeStat('${_tracks.length}', 'LOADED TRACKS')),
+              Expanded(child: _homeStat('${_tracks.length}', 'ALL TRACKS')),
               SizedBox(width: 10),
               Expanded(
                 child: _homeStat(
@@ -2832,7 +2870,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: CircularProgressIndicator(color: C.lime),
               ),
             )
-          else if (_libraryError.isNotEmpty)
+          else if (_connected && _libraryError.isNotEmpty)
             _emptyState(
               'Library unavailable',
               _libraryError,
@@ -2842,11 +2880,12 @@ class _HomeScreenState extends State<HomeScreen> {
           else if (_tracks.isEmpty)
             _emptyState(
               'Your library is empty',
-              'Try refreshing the connection.',
-              action: 'Refresh',
-              onTap: () => _loadLibrary(force: true),
+              'Add music files or choose a folder to start your library.',
+              action: 'Add music',
+              onTap: _importLocalMusic,
             )
           else ...[
+            if (_connected) ...[
             _recommendationShelf('Made for you', _recommended()),
             SizedBox(height: 26),
             _recommendationShelf(
@@ -2875,28 +2914,33 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ],
-          SizedBox(height: 18),
-          _actionButton('Refresh library', onTap: _loadLibrary),
-        ],
-        if (_localTracks.isNotEmpty) ...[
           SizedBox(height: 26),
           _sectionTitle(
-            'On this device',
-            action: 'Add folder',
-            onAction: _importLocalFolder,
+              'All music',
+              action: 'Add music',
+              onAction: _importLocalMusic,
           ),
+            Text(
+              'Songs from your server and this device, together.',
+              style: TextStyle(color: C.muted, fontSize: 11),
+            ),
+            SizedBox(height: 8),
+            ..._tracks.asMap().entries.map(
+              (entry) => _trackRow(entry.value, entry.key),
+            ),
+          ],
           if (_localFolders.isNotEmpty)
             Padding(
-              padding: EdgeInsets.only(bottom: 8),
+              padding: EdgeInsets.only(top: 12),
               child: Text(
-                '${_localFolders.length} watched folder(s) · refreshes automatically',
+                '${_localFolders.length} watched folder(s) · includes nested folders · refreshes automatically',
                 style: TextStyle(color: C.muted, fontSize: 11),
               ),
             ),
-          SizedBox(height: 8),
-          ..._localTracks.asMap().entries.map(
-            (entry) => _trackRow(entry.value, entry.key),
-          ),
+          if (_connected) ...[
+            SizedBox(height: 18),
+            _actionButton('Refresh library', onTap: _loadLibrary),
+          ],
         ],
       ],
     );
@@ -4341,7 +4385,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                                         TextOverflow.ellipsis,
                                                     style: TextStyle(
                                                       fontSize: 12,
-                                                      fontFamily: 'DMSansBold',
+                                                        fontFamily:
+                                                            'DMSansBold',
                                                     ),
                                                   ),
                                                   Text(
@@ -4419,7 +4464,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 SizedBox(width: 30),
                                 Expanded(
                                   child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
@@ -4472,8 +4518,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                           icon: Icon(
                                             _favorites.contains(track.id)
                                                 ? Icons.favorite_rounded
-                                                : Icons.favorite_border_rounded,
-                                            color: _favorites.contains(track.id)
+                                                  : Icons
+                                                        .favorite_border_rounded,
+                                              color:
+                                                  _favorites.contains(track.id)
                                                 ? C.lime
                                                 : C.muted,
                                           ),
@@ -4538,9 +4586,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                             ),
                                           ),
                                           InkWell(
-                                            borderRadius: BorderRadius.circular(
-                                              40,
-                                            ),
+                                              borderRadius:
+                                                  BorderRadius.circular(40),
                                             onTap: _togglePlayback,
                                             child: Container(
                                               width: 50,
@@ -4552,7 +4599,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                               child: Icon(
                                                 _player.playing
                                                     ? Icons.pause_rounded
-                                                    : Icons.play_arrow_rounded,
+                                                      : Icons
+                                                            .play_arrow_rounded,
                                                 color: C.black,
                                                 size: 25,
                                               ),
@@ -4583,7 +4631,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                             onPressed: _cycleRepeatMode,
                                             icon: Icon(
                                               Icons.repeat_rounded,
-                                              color: (_repeatAll || _repeatOne)
+                                                color:
+                                                    (_repeatAll || _repeatOne)
                                                   ? C.lime
                                                   : C.muted,
                                             ),
@@ -4596,7 +4645,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                           onPressed: () => setState(
                                             () => _showUpNext = true,
                                           ),
-                                          icon: Icon(Icons.queue_music_rounded),
+                                            icon: Icon(
+                                              Icons.queue_music_rounded,
+                                            ),
                                           label: Text(
                                             'Up Next · ${_queue.length - _queueIndex - 1}',
                                           ),
@@ -4812,8 +4863,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                           icon: Icon(
                                             _favorites.contains(track.id)
                                                 ? Icons.favorite_rounded
-                                                : Icons.favorite_border_rounded,
-                                            color: _favorites.contains(track.id)
+                                                  : Icons
+                                                        .favorite_border_rounded,
+                                              color:
+                                                  _favorites.contains(track.id)
                                                 ? C.lime
                                                 : C.muted,
                                             size: 24,
@@ -4829,7 +4882,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             _seekBar(progress, duration),
                             SizedBox(height: 8),
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
                                   _formatTime(position),
@@ -4849,7 +4903,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             SizedBox(height: 18),
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                               children: [
                                 IconButton(
                                   visualDensity: VisualDensity.compact,
@@ -4902,7 +4957,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                     minHeight: 40,
                                   ),
                                   onPressed: () => _skip(1),
-                                  icon: Icon(Icons.skip_next_rounded, size: 27),
+                                    icon: Icon(
+                                      Icons.skip_next_rounded,
+                                      size: 27,
+                                    ),
                                 ),
                                 IconButton(
                                   visualDensity: VisualDensity.compact,
@@ -4925,8 +4983,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             Align(
                               alignment: Alignment.centerLeft,
                               child: OutlinedButton.icon(
-                                onPressed: () =>
-                                    setState(() => _showUpNext = !_showUpNext),
+                                  onPressed: () => setState(
+                                    () => _showUpNext = !_showUpNext,
+                                  ),
                                 icon: Icon(
                                   _showUpNext
                                       ? Icons.album_rounded
