@@ -39,6 +39,7 @@ class MusicTrack {
     this.duration = 0,
     this.coverArt,
     this.coverUrl,
+    this.localPath,
   });
 
   final String id;
@@ -48,6 +49,9 @@ class MusicTrack {
   final int duration;
   final String? coverArt;
   final String? coverUrl;
+  final String? localPath;
+
+  bool get isLocal => localPath != null && localPath!.isNotEmpty;
 
   factory MusicTrack.fromJson(Map<String, dynamic> json) => MusicTrack(
     id: '${json['id'] ?? ''}',
@@ -60,6 +64,8 @@ class MusicTrack {
         : 'Unknown album',
     duration: (json['duration'] as num?)?.round() ?? 0,
     coverArt: json['coverArt'] as String?,
+    coverUrl: json['coverUrl'] as String?,
+    localPath: json['localPath'] as String?,
   );
 
   MusicTrack withCover(String? url) => MusicTrack(
@@ -70,6 +76,7 @@ class MusicTrack {
     duration: duration,
     coverArt: coverArt,
     coverUrl: url,
+    localPath: localPath,
   );
 
   Map<String, dynamic> toJson() => {
@@ -80,6 +87,7 @@ class MusicTrack {
     'duration': duration,
     'coverArt': coverArt,
     'coverUrl': coverUrl,
+    'localPath': localPath,
   };
 }
 

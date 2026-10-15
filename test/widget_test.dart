@@ -9,8 +9,25 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:navika/main.dart';
+import 'package:navika/navidrome_client.dart';
 
 void main() {
+  test('local track metadata survives persistence serialization', () {
+    const track = MusicTrack(
+      id: 'local:/music/track.flac',
+      title: 'Track',
+      artist: 'Local file',
+      album: 'On this device',
+      localPath: '/music/track.flac',
+    );
+
+    final restored = MusicTrack.fromJson(track.toJson());
+
+    expect(restored.isLocal, isTrue);
+    expect(restored.localPath, '/music/track.flac');
+    expect(restored.title, 'Track');
+  });
+
   testWidgets('Navika app starts and shows its main navigation', (
     WidgetTester tester,
   ) async {

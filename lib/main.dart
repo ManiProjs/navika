@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -64,6 +65,7 @@ const _repeatOneKey = 'navika.playback.repeat-one';
 const _queueKey = 'navika.playback.queue';
 const _recommendationFeedbackKey = 'navika.recommendations.dismissed';
 const _speedKey = 'navika.playback.speed';
+const _localTracksKey = 'navika.local.tracks';
 
 enum AppTab { home, search, library, playlists, favorites, stats }
 
@@ -491,6 +493,7 @@ class _HomeScreenState extends State<HomeScreen> {
   NavidromeCredentials? _credentials;
 
   List<MusicTrack> _tracks = [];
+  List<MusicTrack> _localTracks = [];
   List<MusicTrack> _searchResults = [];
   List<MusicTrack> _queue = [];
   List<ListeningEvent> _history = [];
@@ -647,7 +650,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void _selectTab(AppTab tab) {
     setState(() {
       _tab = tab;
-      if (tab == AppTab.library && !_connected) _showLogin = true;
+      if (tab == AppTab.library && !_connected && _localTracks.isEmpty) {
+        _showLogin = true;
+      }
     });
     if (tab == AppTab.library && _connected && !_libraryLoaded) {
       unawaited(_loadLibrary());
@@ -658,9 +663,25 @@ class _HomeScreenState extends State<HomeScreen> {
     _searchTimer?.cancel();
     final query = value.trim();
     final requestId = ++_searchRequestId;
-    if (query.isEmpty || !_connected || _client == null) {
+    if (query.isEmpty) {
       setState(() {
         _searchResults = [];
+        _searching = false;
+        _searchError = '';
+      });
+      return;
+    }
+    if (!_connected || _client == null) {
+      final normalized = query.toLowerCase();
+      setState(() {
+        _searchResults = _localTracks
+            .where(
+              (track) =>
+                  track.title.toLowerCase().contains(normalized) ||
+                  track.artist.toLowerCase().contains(normalized) ||
+                  track.album.toLowerCase().contains(normalized),
+            )
+            .toList();
         _searching = false;
         _searchError = '';
       });
@@ -676,7 +697,16 @@ class _HomeScreenState extends State<HomeScreen> {
         final results = await _client!.searchTracks(query);
         if (!mounted || requestId != _searchRequestId) return;
         setState(() {
-          _searchResults = results;
+          final normalized = query.toLowerCase();
+          _searchResults = [
+            ...results,
+            ..._localTracks.where(
+              (track) =>
+                  track.title.toLowerCase().contains(normalized) ||
+                  track.artist.toLowerCase().contains(normalized) ||
+                  track.album.toLowerCase().contains(normalized),
+            ),
+          ];
           _searching = false;
         });
       } catch (error) {
@@ -753,6 +783,25 @@ class _HomeScreenState extends State<HomeScreen> {
     _repeatAll = preferences.getBool(_repeatAllKey) ?? false;
     _repeatOne = preferences.getBool(_repeatOneKey) ?? false;
     _playbackSpeed = preferences.getDouble(_speedKey) ?? 1.0;
+    final savedLocalTracks = preferences.getString(_localTracksKey);
+    if (savedLocalTracks != null) {
+      try {
+        _localTracks = (jsonDecode(savedLocalTracks) as List)
+            .map(
+              (item) => MusicTrack.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            )
+            .where((track) => track.isLocal)
+            .toList();
+        _tracks = List.of(_localTracks);
+        // Local files can be browsed immediately, but do not mark the remote
+        // library as loaded: saved Navidrome credentials still need a fetch.
+        _libraryLoaded = false;
+      } catch (_) {
+        await preferences.remove(_localTracksKey);
+      }
+    }
     _dismissedRecommendations.addAll(
       preferences.getStringList(_recommendationFeedbackKey) ?? const [],
     );
@@ -901,7 +950,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _credentials = credentials;
         _client = client;
-        _tracks = [];
+        _tracks = List.of(_localTracks);
         _queue = [];
         _queueIndex = 0;
         _connected = true;
@@ -937,7 +986,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
 
       setState(() {
-        _tracks = tracks;
+        _tracks = [...tracks, ..._localTracks];
         if (_queue.isEmpty) _queue = tracks;
         _libraryLoaded = true;
         _loading = false;
@@ -952,9 +1001,68 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _importLocalMusic() async {
+    try {
+      final files = await FilePicker.pickFiles(type: FileType.audio);
+      if (files.isEmpty || !mounted) return;
+
+      final imported = <MusicTrack>[];
+      for (final file in files) {
+        final path = file.path;
+        if (path == null || path.isEmpty) continue;
+        final fileName = path.split(RegExp(r'[/\\]')).last;
+        final dot = fileName.lastIndexOf('.');
+        final title = (dot > 0 ? fileName.substring(0, dot) : fileName)
+            .replaceAll(RegExp(r'_+'), ' ')
+            .trim();
+        imported.add(
+          MusicTrack(
+            id: 'local:$path',
+            title: title.isEmpty ? fileName : title,
+            artist: 'Local file',
+            album: 'On this device',
+            localPath: path,
+          ),
+        );
+      }
+      if (imported.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No readable audio files were selected.')),
+        );
+        return;
+      }
+
+      final merged = <String, MusicTrack>{
+        for (final track in _localTracks) track.id: track,
+        for (final track in imported) track.id: track,
+      };
+      final localTracks = merged.values.toList();
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(
+        _localTracksKey,
+        jsonEncode(localTracks.map((track) => track.toJson()).toList()),
+      );
+      if (!mounted) return;
+      setState(() {
+        _localTracks = localTracks;
+        _tracks = [..._tracks.where((track) => !track.isLocal), ...localTracks];
+        _libraryLoaded = true;
+        _showLogin = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Added ${imported.length} local track(s).')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not import music: $error')),
+      );
+    }
+  }
+
   Future<void> _play(MusicTrack track, {List<MusicTrack>? playlist}) async {
     final client = _client;
-    if (client == null) {
+    if (client == null && !track.isLocal) {
       _selectTab(AppTab.library);
       return;
     }
@@ -969,21 +1077,23 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      await _player.setAudioSource(
-        AudioSource.uri(
-          Uri.parse(client.streamUrl(track.id)),
-          tag: MediaItem(
-            id: track.id,
-            title: track.title,
-            artist: track.artist,
-            album: track.album,
-            duration: Duration(seconds: track.duration),
-            artUri: client.coverArtUrl(track.coverArt) == null
-                ? null
-                : Uri.parse(client.coverArtUrl(track.coverArt)!),
-          ),
-        ),
+      final mediaItem = MediaItem(
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        duration: Duration(seconds: track.duration),
+        artUri: client?.coverArtUrl(track.coverArt) == null
+            ? null
+            : Uri.parse(client!.coverArtUrl(track.coverArt)!),
       );
+      final audioSource = track.isLocal
+          ? AudioSource.file(track.localPath!, tag: mediaItem)
+          : AudioSource.uri(
+              Uri.parse(client!.streamUrl(track.id)),
+              tag: mediaItem,
+            );
+      await _player.setAudioSource(audioSource);
       await _player.setLoopMode(_repeatOne ? LoopMode.one : LoopMode.off);
       await _player.setSpeed(_playbackSpeed);
       final started = _player.playerStateStream
@@ -1390,7 +1500,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _credentials = null;
       _client = null;
-      _tracks = [];
+      _tracks = List.of(_localTracks);
       _searchResults = [];
       _searchTimer?.cancel();
       _search.clear();
@@ -2250,7 +2360,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<MusicTrack> _recommended() {
-    return recommendTracks(
+    final ranked = recommendTracks(
       _tracks
           .where((track) => !_dismissedRecommendations.contains(track.id))
           .toList(),
@@ -2259,6 +2369,23 @@ class _HomeScreenState extends State<HomeScreen> {
       favoriteIds: _favorites.toSet(),
       limit: _tracks.length,
     );
+    // Keep a strong listening-history bias from turning the mix into one
+    // artist's discography: no more than two of the last five picks per artist.
+    final diversified = <MusicTrack>[];
+    final remaining = List<MusicTrack>.of(ranked);
+    while (remaining.isNotEmpty) {
+      final nextIndex = remaining.indexWhere((candidate) {
+        final recentArtists = diversified
+            .skip(math.max(0, diversified.length - 4))
+            .map((track) => track.artist.toLowerCase());
+        return recentArtists
+                .where((artist) => artist == candidate.artist.toLowerCase())
+                .length <
+            2;
+      });
+      diversified.add(remaining.removeAt(nextIndex < 0 ? 0 : nextIndex));
+    }
+    return diversified;
   }
 
   List<MusicTrack> _discoveryTracks() {
@@ -2429,7 +2556,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         SizedBox(height: 20),
-        if (!_connected)
+        if (!_connected && _searchResults.isEmpty)
           _emptyState(
             'Connect your music library',
             'Connect to Navidrome to search your music.',
@@ -2489,11 +2616,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    'Music from your Navidrome server.',
+                    'Music from Navidrome and files on this device.',
                     style: TextStyle(color: C.muted, fontSize: 13),
                   ),
                 ],
               ),
+            ),
+            IconButton(
+              tooltip: 'Add local music',
+              onPressed: _importLocalMusic,
+              icon: Icon(Icons.library_add_rounded, color: C.lime),
             ),
             if (_connected)
               IconButton(
@@ -2606,6 +2738,18 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
           SizedBox(height: 18),
           _actionButton('Refresh library', onTap: _loadLibrary),
+        ],
+        if (_localTracks.isNotEmpty) ...[
+          SizedBox(height: 26),
+          _sectionTitle(
+            'On this device',
+            action: 'Add music',
+            onAction: _importLocalMusic,
+          ),
+          SizedBox(height: 8),
+          ..._localTracks.asMap().entries.map(
+            (entry) => _trackRow(entry.value, entry.key),
+          ),
         ],
       ],
     );
@@ -3719,7 +3863,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ? 0.0
         : (position / duration).clamp(0.0, 1.0);
 
-    final ambientColors = _playerAmbientColors(track);
+    final ambientColors = _playerAmbientColors();
     return Material(
       color: Colors.transparent,
       child: TweenAnimationBuilder<double>(
@@ -4663,19 +4807,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  List<Color> _playerAmbientColors(MusicTrack track) {
-    if (C.light) {
-      return [const Color(0xFFF1EEE5), const Color(0xFFE4E8D8)];
-    }
-    final palettes = <List<Color>>[
-      [Color(0xFF7B4A35), Color(0xFF38231D)],
-      [Color(0xFF3F685B), Color(0xFF1D302B)],
-      [Color(0xFF685B86), Color(0xFF29233A)],
-      [Color(0xFF8A6B35), Color(0xFF392D1C)],
-      [Color(0xFF8B4651), Color(0xFF3C2229)],
-      [Color(0xFF426A91), Color(0xFF1D2B3A)],
-    ];
-    return palettes[track.album.hashCode.abs() % palettes.length];
+  List<Color> _playerAmbientColors() {
+    // Match the background glow to Navika's actual lime accent, rather than
+    // choosing an unrelated pseudo-random palette from the album name.
+    return [Color.lerp(C.lime, C.bg, C.light ? .82 : .88)!, C.bg];
   }
 
   Widget _trackRow(MusicTrack track, int index) {
