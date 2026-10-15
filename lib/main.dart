@@ -1557,58 +1557,78 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 28),
         _sectionTitle('Quick start'),
-        _card(
-          child: Row(
-            children: [
-              _artwork(
-                _tracks.isEmpty ? null : _tracks.first.coverArt,
-                size: 66,
-                seed: _tracks.isEmpty ? 'Your library' : _tracks.first.album,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      'YOUR LIBRARY, SHUFFLED',
-                      style: TextStyle(
-                        color: C.lime,
-                        fontFamily: 'DMSansBold',
-                        fontSize: 8,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                    SizedBox(height: 5),
-                    Text(
-                      'Surprise me',
-                      style: TextStyle(fontFamily: 'DMSansBold', fontSize: 17),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'A fresh mix from your own collection.',
-                      style: TextStyle(color: C.muted, fontSize: 10),
-                    ),
-                  ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final cardWidth = (constraints.maxWidth - 12) / 2;
+            final picks = _recommended();
+            final recent = _history.reversed
+                .map((event) => _tracksById[event.id])
+                .whereType<MusicTrack>()
+                .firstOrNull;
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _quickStartCard(
+                  width: cardWidth,
+                  title: 'Surprise me',
+                  subtitle: 'A fresh mix from your own collection.',
+                  icon: Icons.shuffle_rounded,
+                  artwork: _tracks.isEmpty ? null : _tracks.first.coverArt,
+                  seed: _tracks.isEmpty ? 'Your library' : _tracks.first.album,
+                  onTap: () {
+                    if (_tracks.isEmpty) {
+                      _selectTab(AppTab.library);
+                      return;
+                    }
+                    final tracks = List<MusicTrack>.from(_tracks)..shuffle();
+                    _play(tracks.first, playlist: tracks);
+                  },
                 ),
-              ),
-              _roundButton(
-                Icons.shuffle_rounded,
-                background: C.lime,
-                foreground: C.black,
-                // Loading the library is intentionally deferred until Library
-                // is opened; don't silently fetch the entire collection here.
-                onTap: () {
-                  if (_tracks.isEmpty) {
-                    _selectTab(AppTab.library);
-                    return;
-                  }
-                  final tracks = List<MusicTrack>.from(_tracks)..shuffle();
-                  _play(tracks.first, playlist: tracks);
-                },
-              ),
-            ],
-          ),
+                _quickStartCard(
+                  width: cardWidth,
+                  title: 'Picked for you',
+                  subtitle: 'A discovery mix from your library.',
+                  icon: Icons.auto_awesome_rounded,
+                  artwork: picks.isEmpty ? null : picks.first.coverArt,
+                  seed: picks.isEmpty ? 'Picked for you' : picks.first.album,
+                  onTap: () {
+                    if (picks.isEmpty) {
+                      _selectTab(AppTab.library);
+                    } else {
+                      _play(picks.first, playlist: picks);
+                    }
+                  },
+                ),
+                _quickStartCard(
+                  width: cardWidth,
+                  title: 'Your favorites',
+                  subtitle: 'The tracks you saved.',
+                  icon: Icons.favorite_rounded,
+                  artwork: _favoriteTracks.isEmpty
+                      ? null
+                      : _favoriteTracks.first.coverArt,
+                  seed: 'Your favorites',
+                  onTap: () => _selectTab(AppTab.favorites),
+                ),
+                _quickStartCard(
+                  width: cardWidth,
+                  title: 'Recently played',
+                  subtitle: recent?.title ?? 'Pick up where you left off.',
+                  icon: Icons.history_rounded,
+                  artwork: recent?.coverArt,
+                  seed: recent?.album ?? 'Recently played',
+                  onTap: () {
+                    if (recent != null) {
+                      _play(recent);
+                    } else {
+                      _selectTab(AppTab.library);
+                    }
+                  },
+                ),
+              ],
+            );
+          },
         ),
         _sectionTitle(
           'Your library at a glance',
@@ -3775,6 +3795,67 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _quickStartCard({
+    required double width,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required String? artwork,
+    required String seed,
+    required VoidCallback onTap,
+  }) {
+    return SizedBox(
+      width: width,
+      child: Material(
+        color: C.surface,
+        borderRadius: BorderRadius.circular(14),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: _artwork(artwork, size: 42, seed: seed),
+                    ),
+                    const Spacer(),
+                    Icon(icon, size: 17, color: C.lime),
+                  ],
+                ),
+                const SizedBox(height: 11),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: 'DMSansBold',
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: C.muted,
+                    fontSize: 10,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _sectionTitle(String title, {String? action, VoidCallback? onAction}) {
     return Padding(
       padding: const EdgeInsets.only(top: 2, bottom: 14),
@@ -3872,24 +3953,6 @@ class _HomeScreenState extends State<HomeScreen> {
             fontSize: 12,
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _roundButton(
-    IconData icon, {
-    required Color background,
-    required Color foreground,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(30),
-      child: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(color: background, shape: BoxShape.circle),
-        child: Icon(icon, size: 20, color: foreground),
       ),
     );
   }
