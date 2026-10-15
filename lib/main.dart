@@ -3083,11 +3083,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
 
                     if (constraints.maxWidth > 680) {
-                      final desktopArtSize = (constraints.maxHeight * .66)
-                          .clamp(220.0, 440.0);
+                      final desktopArtSize = (constraints.maxHeight * .48)
+                          .clamp(170.0, 310.0);
                       if (_showUpNext) {
                         return Padding(
-                          padding: const EdgeInsets.fromLTRB(28, 18, 28, 20),
+                          padding: const EdgeInsets.fromLTRB(28, 12, 28, 12),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
@@ -3116,7 +3116,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         ),
                                       ),
                                     ),
-                                    const SizedBox(height: 20),
+                                    const SizedBox(height: 12),
                                     Row(
                                       children: [
                                         Expanded(
@@ -3126,8 +3126,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                             overflow: TextOverflow.ellipsis,
                                             style: const TextStyle(
                                               fontFamily: 'SyneBold',
-                                              fontSize: 25,
-                                              height: 1.05,
+                                              fontSize: 22,
+                                              height: 1.0,
                                             ),
                                           ),
                                         ),
@@ -3153,7 +3153,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         fontSize: 12,
                                       ),
                                     ),
-                                    const SizedBox(height: 16),
+                                    const SizedBox(height: 8),
                                     _seekBar(progress, duration),
                                     Row(
                                       mainAxisAlignment:
@@ -3175,7 +3175,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         ),
                                       ],
                                     ),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: 0),
                                     Row(
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
