@@ -16,16 +16,22 @@ void main() {
     const track = MusicTrack(
       id: 'local:/music/track.flac',
       title: 'Track',
-      artist: 'Local file',
-      album: 'On this device',
+      artist: 'Embedded Artist',
+      album: 'Embedded Album',
       localPath: '/music/track.flac',
+      localArtworkPath: '/app/artwork/track.img',
+      localMetadataRead: true,
     );
 
     final restored = MusicTrack.fromJson(track.toJson());
 
     expect(restored.isLocal, isTrue);
     expect(restored.localPath, '/music/track.flac');
+    expect(restored.localArtworkPath, '/app/artwork/track.img');
+    expect(restored.localMetadataRead, isTrue);
     expect(restored.title, 'Track');
+    expect(restored.artist, 'Embedded Artist');
+    expect(restored.album, 'Embedded Album');
   });
 
   testWidgets('Navika app starts and shows its main navigation', (

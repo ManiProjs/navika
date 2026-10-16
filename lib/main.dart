@@ -7,8 +7,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:audio_metadata_reader/audio_metadata_reader.dart';
+import 'package:crypto/crypto.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'navidrome_client.dart';
@@ -68,6 +71,23 @@ const _recommendationFeedbackKey = 'navika.recommendations.dismissed';
 const _speedKey = 'navika.playback.speed';
 const _localTracksKey = 'navika.local.tracks';
 const _localFoldersKey = 'navika.local.folders';
+
+Map<String, Object?> _readEmbeddedMetadata(String path) {
+  final metadata = readMetadata(File(path), getImage: true);
+  final frontCover = metadata.pictures.where((picture) =>
+    picture.pictureType == PictureType.coverFront,
+  );
+  final picture = frontCover.isNotEmpty
+      ? frontCover.first
+      : (metadata.pictures.isEmpty ? null : metadata.pictures.first);
+  return {
+    'title': metadata.title,
+    'artist': metadata.artist ?? metadata.albumArtist,
+    'album': metadata.album,
+    'duration': metadata.duration?.inSeconds,
+    'artwork': picture?.bytes,
+  };
+}
 
 enum AppTab { home, search, library, playlists, favorites, stats }
 
@@ -1041,20 +1061,7 @@ class _HomeScreenState extends State<HomeScreen> {
       for (final file in files) {
         final path = file.path;
         if (path == null || path.isEmpty) continue;
-        final fileName = path.split(RegExp(r'[/\\]')).last;
-        final dot = fileName.lastIndexOf('.');
-        final title = (dot > 0 ? fileName.substring(0, dot) : fileName)
-            .replaceAll(RegExp(r'_+'), ' ')
-            .trim();
-        imported.add(
-          MusicTrack(
-            id: 'local:$path',
-            title: title.isEmpty ? fileName : title,
-            artist: 'Local file',
-            album: 'On this device',
-            localPath: path,
-          ),
-        );
+        imported.add(await _localTrackFromPath(path));
       }
       if (imported.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1125,6 +1132,60 @@ class _HomeScreenState extends State<HomeScreen> {
     caseSensitive: false,
   ).hasMatch(path);
 
+  Future<MusicTrack> _localTrackFromPath(String path) async {
+    final fileName = path.split(RegExp(r'[/\\]')).last;
+    final dot = fileName.lastIndexOf('.');
+    final fallbackTitle = (dot > 0 ? fileName.substring(0, dot) : fileName)
+        .replaceAll(RegExp(r'_+'), ' ')
+        .trim();
+
+    String? title;
+    String? artist;
+    String? album;
+    int duration = 0;
+    String? artworkPath;
+
+    try {
+      final metadata = await compute<String, Map<String, Object?>>(
+        _readEmbeddedMetadata,
+        path,
+      );
+      title = (metadata['title'] as String?)?.trim();
+      artist = (metadata['artist'] as String?)?.trim();
+      album = (metadata['album'] as String?)?.trim();
+      duration = (metadata['duration'] as int?) ?? 0;
+
+      final artwork = metadata['artwork'];
+      if (artwork is List<int> && artwork.isNotEmpty) {
+        final supportDirectory = await getApplicationSupportDirectory();
+        final artworkDirectory = Directory('${supportDirectory.path}/artwork');
+        await artworkDirectory.create(recursive: true);
+        final digest = md5.convert(utf8.encode(path)).toString();
+        final artworkFile = File('${artworkDirectory.path}/$digest.img');
+        if (!await artworkFile.exists()) {
+          await artworkFile.writeAsBytes(artwork, flush: true);
+        }
+        artworkPath = artworkFile.path;
+      }
+    } catch (_) {
+      // Some formats have no supported tags. Keep the file importable and use
+      // filename-based fallbacks rather than failing the entire import/scan.
+    }
+
+    return MusicTrack(
+      id: 'local:$path',
+      title: title?.isNotEmpty == true
+          ? title!
+          : (fallbackTitle.isEmpty ? fileName : fallbackTitle),
+      artist: artist?.isNotEmpty == true ? artist! : 'Unknown artist',
+      album: album?.isNotEmpty == true ? album! : 'Unknown album',
+      duration: duration,
+      localPath: path,
+      localArtworkPath: artworkPath,
+      localMetadataRead: true,
+    );
+  }
+
   Future<void> _scanLocalFolders({bool showFeedback = false}) async {
     if (_scanningLocalFolders || _localFolders.isEmpty) return;
     _scanningLocalFolders = true;
@@ -1144,18 +1205,13 @@ class _HomeScreenState extends State<HomeScreen> {
           )) {
             if (entity is! File || !_isAudioFile(entity.path)) continue;
             final path = entity.path;
-            final fileName = path.split(RegExp(r'[/\\]')).last;
-            final dot = fileName.lastIndexOf('.');
-            final title = (dot > 0 ? fileName.substring(0, dot) : fileName)
-                .replaceAll(RegExp(r'_+'), ' ')
-                .trim();
-            discovered['local:$path'] = MusicTrack(
-              id: 'local:$path',
-              title: title.isEmpty ? fileName : title,
-              artist: 'Local file',
-              album: 'On this device',
-              localPath: path,
+            final existing = _localTracks.where(
+              (track) => track.localPath == path,
             );
+            discovered['local:$path'] = existing.isNotEmpty &&
+                    existing.first.localMetadataRead
+                ? existing.first
+                : await _localTrackFromPath(path);
           }
         } catch (_) {
           inaccessibleFolders.add(folder);
@@ -1185,10 +1241,8 @@ class _HomeScreenState extends State<HomeScreen> {
           (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
         );
       final changed =
-          updated.length != _localTracks.length ||
-          !updated.every(
-            (track) => _localTracks.any((old) => old.id == track.id),
-          );
+          jsonEncode(updated.map((track) => track.toJson()).toList()) !=
+          jsonEncode(_localTracks.map((track) => track.toJson()).toList());
       if (changed) {
         final preferences = await SharedPreferences.getInstance();
         await preferences.setString(
@@ -1243,9 +1297,11 @@ class _HomeScreenState extends State<HomeScreen> {
         artist: track.artist,
         album: track.album,
         duration: Duration(seconds: track.duration),
-        artUri: client?.coverArtUrl(track.coverArt) == null
-            ? null
-            : Uri.parse(client!.coverArtUrl(track.coverArt)!),
+        artUri: track.localArtworkPath != null
+            ? Uri.file(track.localArtworkPath!)
+            : (client?.coverArtUrl(track.coverArt) == null
+                  ? null
+                  : Uri.parse(client!.coverArtUrl(track.coverArt)!)),
       );
       final audioSource = track.isLocal
           ? AudioSource.file(track.localPath!, tag: mediaItem)
@@ -2291,6 +2347,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         _artwork(
                           album.track.coverArt,
+                          localArtworkPath: album.track.localArtworkPath,
                           size: 148,
                           seed: album.album,
                         ),
@@ -2489,7 +2546,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _artwork(track.coverArt, size: 126, seed: track.album),
+                        _artwork(
+                          track.coverArt,
+                          localArtworkPath: track.localArtworkPath,
+                          size: 126,
+                          seed: track.album,
+                        ),
                         SizedBox(height: 9),
                         Text(
                           track.album,
@@ -2651,7 +2713,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _artwork(track.coverArt, size: 136, seed: track.album),
+                      _artwork(
+                        track.coverArt,
+                        localArtworkPath: track.localArtworkPath,
+                        size: 136,
+                        seed: track.album,
+                      ),
                       SizedBox(height: 8),
                       Text(
                         track.title,
@@ -3221,7 +3288,12 @@ class _HomeScreenState extends State<HomeScreen> {
         tracks: _tracks,
         existingIds: _playlists[playlist]!.toSet(),
         artwork: (track) =>
-            _artwork(track.coverArt, size: 42, seed: track.album),
+            _artwork(
+              track.coverArt,
+              localArtworkPath: track.localArtworkPath,
+              size: 42,
+              seed: track.album,
+            ),
       ),
     );
 
@@ -3265,7 +3337,12 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             SizedBox(width: 10),
-            _artwork(track.coverArt, size: 46, seed: track.album),
+            _artwork(
+              track.coverArt,
+              localArtworkPath: track.localArtworkPath,
+              size: 46,
+              seed: track.album,
+            ),
             SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -3413,6 +3490,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   contentPadding: EdgeInsets.zero,
                   leading: _artwork(
                     item.track.coverArt,
+                    localArtworkPath: item.track.localArtworkPath,
                     size: 44,
                     seed: item.album,
                   ),
@@ -3466,6 +3544,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             _artwork(
                               track.coverArt,
+                              localArtworkPath: track.localArtworkPath,
                               size: 42,
                               seed: track.album,
                             ),
@@ -4191,6 +4270,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                           child: _artwork(
                                             track.coverArt,
+                                            localArtworkPath: track.localArtworkPath,
                                             size: desktopArtSize,
                                             seed: track.album,
                                           ),
@@ -4368,6 +4448,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                   BorderRadius.circular(5),
                                               child: _artwork(
                                                 track.coverArt,
+                                                localArtworkPath: track.localArtworkPath,
                                                 size: 42,
                                                 seed: track.album,
                                               ),
@@ -4457,6 +4538,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   borderRadius: BorderRadius.circular(12),
                                   child: _artwork(
                                     track.coverArt,
+                                    localArtworkPath: track.localArtworkPath,
                                     size: desktopArtSize,
                                     seed: track.album,
                                   ),
@@ -4717,6 +4799,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       contentPadding: EdgeInsets.zero,
                                       leading: _artwork(
                                         entry.value.coverArt,
+                                        localArtworkPath: entry.value.localArtworkPath,
                                         size: 42,
                                         seed: entry.value.album,
                                       ),
@@ -4794,6 +4877,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     borderRadius: BorderRadius.circular(10),
                                     child: _artwork(
                                       track.coverArt,
+                                      localArtworkPath: track.localArtworkPath,
                                       size: artSize,
                                       seed: track.album,
                                     ),
@@ -5043,7 +5127,12 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             SizedBox(width: 10),
-            _artwork(track.coverArt, size: 46, seed: track.album),
+            _artwork(
+              track.coverArt,
+              localArtworkPath: track.localArtworkPath,
+              size: 46,
+              seed: track.album,
+            ),
             SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -5115,6 +5204,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _artwork(
     String? coverArt, {
+    String? localArtworkPath,
     required double size,
     required String seed,
   }) {
@@ -5134,7 +5224,21 @@ class _HomeScreenState extends State<HomeScreen> {
       height: size,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: url == null
+        child: localArtworkPath != null
+            ? Image.file(
+                File(localArtworkPath),
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Container(
+                  color: color,
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.music_note_rounded,
+                    color: C.lime,
+                    size: 30,
+                  ),
+                ),
+              )
+            : url == null
             ? Container(
                 color: color,
                 child: Stack(

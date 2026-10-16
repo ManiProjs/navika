@@ -36,6 +36,11 @@ dependencies:
   shared_preferences: ^2.5.6
   just_audio_background: ^0.0.1-beta.17
   file_picker: ^13.1.0
+  audio_metadata_reader:
+    git:
+      url: https://github.com/ClementBeal/audio_metadata_reader.git
+      ref: a45b602023fb3743a048edd8771758c93c46de1b
+  path_provider: ^2.1.5
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -47,6 +52,12 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
+
+dependency_overrides:
+  charset:
+    git:
+      url: https://github.com/shirne/charset-dart.git
+      ref: 5050627ae5a1f20d9b0597e2fbfc76bc7d4442fb
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
