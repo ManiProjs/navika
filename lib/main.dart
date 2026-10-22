@@ -2604,7 +2604,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(color: C.muted, fontSize: 13, height: 1.6),
                 ),
                 SizedBox(height: 18),
-                _actionButton('Add music', onTap: _importLocalMusic),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    _actionButton('Add your music', onTap: _importLocalMusic),
+                    _actionButton(
+                      'Connect to Navidrome',
+                      onTap: () => setState(() => _showLogin = true),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
