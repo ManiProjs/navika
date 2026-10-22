@@ -56,7 +56,7 @@ void main() {
     await tester.tap(find.text('Search').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Find your music.'), findsOneWidget);
-    expect(find.text('Connect your music library'), findsOneWidget);
+    expect(find.text('Find your music'), findsOneWidget);
+    expect(find.text('Add music to search'), findsOneWidget);
   });
 }

@@ -1,3 +1,5 @@
+
+
 allprojects {
     // Keep plugin buildscript classpaths aligned with the app's AGP version;
     // several plugins otherwise request mismatched AGP releases.

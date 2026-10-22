@@ -16,17 +16,26 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'navidrome_client.dart';
 
-Future<void> main() async {
+Future<void> _audioServiceReady = Future<void>.value();
+bool _audioServiceInitializationRequired = false;
+
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   if (defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS) {
-    await JustAudioBackground.init(
-      androidNotificationChannelId: 'app.navika.audio',
-      androidNotificationChannelName: 'Navika playback',
-      androidNotificationOngoing: true,
-    );
+    _audioServiceInitializationRequired = true;
+    _audioServiceReady =
+        JustAudioBackground.init(
+          androidNotificationChannelId: 'app.navika.audio',
+          androidNotificationChannelName: 'Navika playback',
+          androidNotificationOngoing: true,
+        ).catchError((Object error, StackTrace stackTrace) {
+          debugPrint('Navika audio service initialization failed: $error');
+        });
   }
-  runApp(NavikaApp());
+  // Render Flutter's first frame immediately instead of keeping Android's
+  // launch screen up while audio_service initializes.
+  runApp(const NavikaApp());
 }
 
 enum NavikaTheme { dark, amoled, light }
@@ -71,11 +80,13 @@ const _recommendationFeedbackKey = 'navika.recommendations.dismissed';
 const _speedKey = 'navika.playback.speed';
 const _localTracksKey = 'navika.local.tracks';
 const _localFoldersKey = 'navika.local.folders';
+const _androidLocalFolders = MethodChannel('app.navika/local_folders');
+const _localFolderRescanInterval = Duration(minutes: 1);
 
 Map<String, Object?> _readEmbeddedMetadata(String path) {
   final metadata = readMetadata(File(path), getImage: true);
-  final frontCover = metadata.pictures.where((picture) =>
-    picture.pictureType == PictureType.coverFront,
+  final frontCover = metadata.pictures.where(
+    (picture) => picture.pictureType == PictureType.coverFront,
   );
   final picture = frontCover.isNotEmpty
       ? frontCover.first
@@ -220,8 +231,53 @@ class NavikaApp extends StatelessWidget {
           dividerColor: C.border,
           useMaterial3: true,
         ),
-        home: HomeScreen(),
+        home: const _StartupGate(),
       ),
+    );
+  }
+}
+
+class _StartupGate extends StatelessWidget {
+  const _StartupGate();
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_audioServiceInitializationRequired) return const HomeScreen();
+    return FutureBuilder<void>(
+      future: _audioServiceReady,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.done) {
+          return const HomeScreen();
+        }
+        return Scaffold(
+          backgroundColor: C.bg,
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'navika',
+                  style: TextStyle(
+                    fontFamily: 'SyneBold',
+                    fontSize: 38,
+                    color: C.text,
+                    letterSpacing: -1.5,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: C.lime,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -498,6 +554,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final AudioPlayer _player = AudioPlayer();
+  final ValueNotifier<Duration> _position = ValueNotifier(Duration.zero);
   final List<StreamSubscription<dynamic>> _playerSubscriptions = [];
   final GlobalKey _progressBarKey = GlobalKey();
   final TextEditingController _search = TextEditingController();
@@ -512,6 +569,7 @@ class _HomeScreenState extends State<HomeScreen> {
   double _playbackSpeed = 1.0;
 
   AppTab _tab = AppTab.home;
+  bool _showLocalLibrary = false;
   NavidromeClient? _client;
   NavidromeCredentials? _credentials;
 
@@ -545,6 +603,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _handlingCompletion = false;
   bool _seeking = false;
   bool _scanningLocalFolders = false;
+  bool _localFolderScanRequested = false;
+  bool _pendingFolderScanFeedback = false;
 
   String _error = '';
   String _libraryError = '';
@@ -568,8 +628,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     _playerSubscriptions.add(
-      _player.positionStream.listen((_) {
-        if (mounted) setState(() {});
+      _player.positionStream.listen((position) {
+        // Position ticks arrive several times per second. Keep them out of the
+        // page-level setState so a progress update doesn't rebuild the entire
+        // library, settings, artwork shelves, and navigation on older phones.
+        _position.value = position;
       }),
     );
     _playerSubscriptions.add(
@@ -658,8 +721,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Map<String, MusicTrack> get _tracksById => {
-    for (final track in _tracks) track.id: track,
+    for (final track in _modeTracks) track.id: track,
   };
+
+  List<MusicTrack> get _modeTracks => _showLocalLibrary
+      ? _mergeLibraryTracks(_localTracks)
+      : _mergeLibraryTracks(_tracks.where((track) => !track.isLocal));
 
   List<MusicTrack> _mergeLibraryTracks(Iterable<MusicTrack> tracks) {
     final unique = <String, MusicTrack>{};
@@ -677,13 +744,15 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  int get _albumCount => _tracks
+  int get _albumCount => _modeTracks
       .map(
         (track) =>
             '${track.album.trim().toLowerCase()}::${track.artist.trim().toLowerCase()}',
       )
       .toSet()
       .length;
+
+  List<MusicTrack> get _visibleLibraryTracks => _modeTracks;
 
   List<MusicTrack> get _favoriteTracks =>
       _favorites.map((id) => _tracksById[id]).whereType<MusicTrack>().toList();
@@ -700,6 +769,30 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  bool get _shouldHandleSystemBack =>
+      _showVisualizer ||
+      _showUpNext ||
+      _showPlayer ||
+      _showSettings ||
+      _showLogin ||
+      _tab != AppTab.home;
+
+  void _handleSystemBack() {
+    if (_showVisualizer) {
+      setState(() => _showVisualizer = false);
+    } else if (_showUpNext) {
+      setState(() => _showUpNext = false);
+    } else if (_showPlayer) {
+      setState(() => _showPlayer = false);
+    } else if (_showSettings) {
+      setState(() => _showSettings = false);
+    } else if (_showLogin) {
+      setState(() => _showLogin = false);
+    } else if (_tab != AppTab.home) {
+      _selectTab(AppTab.home);
+    }
+  }
+
   void _runSearch(String value) {
     _searchTimer?.cancel();
     final query = value.trim();
@@ -712,17 +805,18 @@ class _HomeScreenState extends State<HomeScreen> {
       });
       return;
     }
-    if (!_connected || _client == null) {
+    if (_showLocalLibrary || !_connected || _client == null) {
       final normalized = query.toLowerCase();
       setState(() {
-        _searchResults = _localTracks
-            .where(
-              (track) =>
-                  track.title.toLowerCase().contains(normalized) ||
-                  track.artist.toLowerCase().contains(normalized) ||
-                  track.album.toLowerCase().contains(normalized),
-            )
-            .toList();
+        _searchResults =
+            (_showLocalLibrary ? _localTracks : const <MusicTrack>[])
+                .where(
+                  (track) =>
+                      track.title.toLowerCase().contains(normalized) ||
+                      track.artist.toLowerCase().contains(normalized) ||
+                      track.album.toLowerCase().contains(normalized),
+                )
+                .toList();
         _searching = false;
         _searchError = '';
       });
@@ -739,15 +833,16 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!mounted || requestId != _searchRequestId) return;
         setState(() {
           final normalized = query.toLowerCase();
-          _searchResults = _mergeLibraryTracks([
-            ...results,
-            ..._localTracks.where(
-              (track) =>
-                  track.title.toLowerCase().contains(normalized) ||
-                  track.artist.toLowerCase().contains(normalized) ||
-                  track.album.toLowerCase().contains(normalized),
-            ),
-          ]);
+          _searchResults = _showLocalLibrary
+              ? _localTracks
+                    .where(
+                      (track) =>
+                          track.title.toLowerCase().contains(normalized) ||
+                          track.artist.toLowerCase().contains(normalized) ||
+                          track.album.toLowerCase().contains(normalized),
+                    )
+                    .toList()
+              : results.where((track) => !track.isLocal).toList();
           _searching = false;
         });
       } catch (error) {
@@ -824,7 +919,15 @@ class _HomeScreenState extends State<HomeScreen> {
     _repeatAll = preferences.getBool(_repeatAllKey) ?? false;
     _repeatOne = preferences.getBool(_repeatOneKey) ?? false;
     _playbackSpeed = preferences.getDouble(_speedKey) ?? 1.0;
-    _localFolders = preferences.getStringList(_localFoldersKey) ?? [];
+    final savedFolders = preferences.getStringList(_localFoldersKey) ?? [];
+    // Older Android builds stored filesystem paths, but scoped storage does
+    // not grant access to those paths. Only SAF tree URIs are valid on Android.
+    _localFolders = Platform.isAndroid
+        ? savedFolders.where((folder) => folder.startsWith('saf:')).toList()
+        : savedFolders;
+    if (_localFolders.length != savedFolders.length) {
+      await preferences.setStringList(_localFoldersKey, _localFolders);
+    }
     final savedLocalTracks = preferences.getString(_localTracksKey);
     if (savedLocalTracks != null) {
       try {
@@ -847,11 +950,15 @@ class _HomeScreenState extends State<HomeScreen> {
       // Refresh watched folders before showing the library. The picker grants
       // access to user-selected locations; if a location is no longer
       // accessible, the scan preserves its previously indexed tracks.
-      unawaited(_scanLocalFolders());
-      _folderScanTimer ??= Timer.periodic(
-        Duration(seconds: 20),
-        (_) => unawaited(_scanLocalFolders()),
-      );
+      // Do not compete with the first few frames for disk and SAF-provider I/O.
+      Future<void>.delayed(const Duration(milliseconds: 700), () {
+        if (!mounted) return;
+        unawaited(_scanLocalFolders());
+        _folderScanTimer ??= Timer.periodic(
+          _localFolderRescanInterval,
+          (_) => unawaited(_scanLocalFolders()),
+        );
+      });
     }
     _dismissedRecommendations.addAll(
       preferences.getStringList(_recommendationFeedbackKey) ?? const [],
@@ -1063,6 +1170,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (path == null || path.isEmpty) continue;
         imported.add(await _localTrackFromPath(path));
       }
+      if (!mounted) return;
       if (imported.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('No readable audio files were selected.')),
@@ -1103,19 +1211,32 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _importLocalFolder() async {
     try {
-      final folder = await FilePicker.getDirectoryPath(
-        dialogTitle: 'Choose a folder containing music',
-      );
-      if (folder == null || folder.isEmpty || !mounted) return;
-
-      final normalized = folder.replaceFirst(RegExp(r'[/\\]+$'), '');
-      final folders = {..._localFolders, normalized}.toList();
+      String? normalized;
+      if (Platform.isAndroid) {
+        final selected = await _androidLocalFolders
+            .invokeMapMethod<String, dynamic>('pickFolder');
+        final uri = selected?['uri'] as String?;
+        if (uri == null || uri.isEmpty || !mounted) return;
+        normalized = 'saf:$uri';
+      } else {
+        final folder = await FilePicker.getDirectoryPath(
+          dialogTitle: 'Choose a folder containing music',
+        );
+        if (folder == null || folder.isEmpty || !mounted) return;
+        normalized = folder.replaceFirst(RegExp(r'[/\\]+$'), '');
+      }
+      // Drop legacy Android filesystem paths when adding a SAF folder. Keeping
+      // them causes Directory.list() to throw Permission denied on every scan.
+      final existingFolders = Platform.isAndroid
+          ? _localFolders.where((folder) => folder.startsWith('saf:'))
+          : _localFolders;
+      final folders = {...existingFolders, normalized}.toList();
       final preferences = await SharedPreferences.getInstance();
       await preferences.setStringList(_localFoldersKey, folders);
       if (!mounted) return;
       setState(() => _localFolders = folders);
       _folderScanTimer ??= Timer.periodic(
-        Duration(seconds: 20),
+        _localFolderRescanInterval,
         (_) => unawaited(_scanLocalFolders()),
       );
       await _scanLocalFolders(showFeedback: true);
@@ -1127,13 +1248,58 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _removeLocalFolder(String folder) async {
+    final folders = _localFolders.where((item) => item != folder).toList();
+    // SAF-copied tracks have cache paths rather than their original URI. Clear
+    // their indexed entries, then repopulate from any remaining watched folders.
+    final localTracks = _localTracks
+        .where(
+          (track) => !(track.localPath ?? '').contains('/navika_imported/'),
+        )
+        .toList();
+    final merged = _mergeLibraryTracks([
+      ..._tracks.where((track) => !track.isLocal),
+      ...localTracks,
+    ]);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setStringList(_localFoldersKey, folders);
+    await preferences.setString(
+      _localTracksKey,
+      jsonEncode(localTracks.map((track) => track.toJson()).toList()),
+    );
+    if (!mounted) return;
+    setState(() {
+      _localFolders = folders;
+      _localTracks = localTracks;
+      _tracks = merged;
+    });
+    unawaited(_scanLocalFolders());
+  }
+
+  String _folderDisplayName(String folder) {
+    if (folder.startsWith('saf:')) {
+      final uri = Uri.tryParse(folder.substring(4));
+      if (uri != null && uri.pathSegments.isNotEmpty) {
+        return Uri.decodeComponent(uri.pathSegments.last);
+      }
+      return 'Android folder';
+    }
+    final parts = folder
+        .split(RegExp(r'[/\\]'))
+        .where((part) => part.isNotEmpty);
+    return parts.isEmpty ? folder : parts.last;
+  }
+
   bool _isAudioFile(String path) => RegExp(
-    r'\.(mp3|m4a|aac|wav|flac|ogg|oga|opus|aiff|aif|ape|wv|mp4|3gp)$',
+    r'\.(mp3|m4a|m4b|m4p|aac|adts|wav|wave|bwf|flac|ogg|oga|opus|aiff|aif|alac|ape|wv|mp4|3gp|mka|webm|wma|mid|midi|caf|amr|ac3|dts|dsf|dff|mpc|tak|audio)$',
     caseSensitive: false,
   ).hasMatch(path);
 
   Future<MusicTrack> _localTrackFromPath(String path) async {
-    final fileName = path.split(RegExp(r'[/\\]')).last;
+    final isContentUri = Platform.isAndroid && path.startsWith('content://');
+    final fileName = isContentUri
+        ? (Uri.tryParse(path)?.pathSegments.lastOrNull ?? 'Local audio')
+        : path.split(RegExp(r'[/\\]')).last;
     final dot = fileName.lastIndexOf('.');
     final fallbackTitle = (dot > 0 ? fileName.substring(0, dot) : fileName)
         .replaceAll(RegExp(r'_+'), ' ')
@@ -1146,11 +1312,25 @@ class _HomeScreenState extends State<HomeScreen> {
     String? artworkPath;
 
     try {
-      final metadata = await compute<String, Map<String, Object?>>(
-        _readEmbeddedMetadata,
-        path,
-      );
+      final metadata = isContentUri
+          ? await _androidLocalFolders.invokeMapMethod<String, dynamic>(
+              'readMetadata',
+              {'uri': path},
+            )
+          : await compute<String, Map<String, Object?>>(
+              _readEmbeddedMetadata,
+              path,
+            );
+      if (metadata == null) throw StateError('Could not read audio metadata');
       title = (metadata['title'] as String?)?.trim();
+      if (title?.isNotEmpty != true && metadata['fileName'] is String) {
+        final sourceName = (metadata['fileName'] as String).trim();
+        final sourceDot = sourceName.lastIndexOf('.');
+        title =
+            (sourceDot > 0 ? sourceName.substring(0, sourceDot) : sourceName)
+                .replaceAll(RegExp(r'_+'), ' ')
+                .trim();
+      }
       artist = (metadata['artist'] as String?)?.trim();
       album = (metadata['album'] as String?)?.trim();
       duration = (metadata['duration'] as int?) ?? 0;
@@ -1187,34 +1367,68 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _scanLocalFolders({bool showFeedback = false}) async {
-    if (_scanningLocalFolders || _localFolders.isEmpty) return;
+    if (_localFolders.isEmpty) return;
+    if (_scanningLocalFolders) {
+      // A folder can be added while startup or the periodic refresh is already
+      // scanning. Never drop that request: run another pass with the latest
+      // folder list as soon as the active scan finishes.
+      _localFolderScanRequested = true;
+      _pendingFolderScanFeedback = _pendingFolderScanFeedback || showFeedback;
+      return;
+    }
     _scanningLocalFolders = true;
     try {
       final discovered = <String, MusicTrack>{};
       final inaccessibleFolders = <String>[];
+      final folderErrors = <String, String>{};
       for (final folder in _localFolders) {
         try {
-          final directory = Directory(folder);
-          if (!await directory.exists()) {
-            inaccessibleFolders.add(folder);
-            continue;
+          late final Iterable<String> paths;
+          if (Platform.isAndroid && folder.startsWith('saf:')) {
+            final uri = folder.substring(4);
+            final result = await _androidLocalFolders.invokeListMethod<String>(
+              'scanFolder',
+              {'uri': uri},
+            );
+            paths = result ?? const <String>[];
+          } else {
+            final directory = Directory(folder);
+            if (!await directory.exists()) {
+              inaccessibleFolders.add(folder);
+              folderErrors[folder] = 'Folder no longer exists';
+              continue;
+            }
+            final found = <String>[];
+            await for (final entity in directory.list(
+              recursive: true,
+              followLinks: false,
+            )) {
+              if (entity is File && _isAudioFile(entity.path)) {
+                found.add(entity.path);
+              }
+            }
+            paths = found;
           }
-          await for (final entity in directory.list(
-            recursive: true,
-            followLinks: false,
-          )) {
-            if (entity is! File || !_isAudioFile(entity.path)) continue;
-            final path = entity.path;
+          for (final path in paths) {
+            // Android's SAF scanner already filters by the document's real
+            // display name and MIME type. A content:// URI is an opaque ID on
+            // many providers (not a filename), so checking its suffix here
+            // incorrectly discards valid MP3s and other audio files.
+            if (!(Platform.isAndroid && folder.startsWith('saf:')) &&
+                !_isAudioFile(path)) {
+              continue;
+            }
             final existing = _localTracks.where(
               (track) => track.localPath == path,
             );
-            discovered['local:$path'] = existing.isNotEmpty &&
-                    existing.first.localMetadataRead
+            discovered['local:$path'] =
+                existing.isNotEmpty && existing.first.localMetadataRead
                 ? existing.first
                 : await _localTrackFromPath(path);
           }
-        } catch (_) {
+        } catch (error) {
           inaccessibleFolders.add(folder);
+          folderErrors[folder] = error.toString();
         }
       }
 
@@ -1223,6 +1437,14 @@ class _HomeScreenState extends State<HomeScreen> {
       final retained = _localTracks.where((track) {
         final path = track.localPath;
         if (path == null) return false;
+        // Old Android versions copied SAF audio into app-private storage.
+        // Once a provider URI has been indexed, don't retain those duplicate
+        // cached tracks alongside the original files.
+        if (Platform.isAndroid &&
+            inaccessibleFolders.isEmpty &&
+            path.contains('/navika_imported/')) {
+          return false;
+        }
         final parentFolder = _localFolders.where(
           (folder) => path.startsWith('$folder/'),
         );
@@ -1260,17 +1482,46 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
       }
-      if (showFeedback && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Folder added. Found ${discovered.length} audio file(s); checking for changes every 20 seconds.',
-            ),
-          ),
+      if (Platform.isAndroid &&
+          discovered.keys.any((id) => id.startsWith('local:content://'))) {
+        // Remove legacy copies after the library has been migrated to content
+        // URIs. Keep the currently playing file until playback moves away.
+        final legacyDirectory = Directory(
+          '${(await getApplicationSupportDirectory()).path}/navika_imported',
         );
+        if (await legacyDirectory.exists()) {
+          final activePath = _current?.localPath;
+          await for (final entity in legacyDirectory.list(followLinks: false)) {
+            if (entity is File && entity.path != activePath) {
+              try {
+                await entity.delete();
+              } catch (_) {
+                // A legacy file may still be open by the audio player.
+              }
+            }
+          }
+        }
+      }
+      if (showFeedback && mounted) {
+        final message = folderErrors.isNotEmpty
+            ? 'Could not read ${folderErrors.length} folder(s): ${folderErrors.entries.map((entry) => '${entry.key}: ${entry.value}').join('; ')}'
+            : discovered.isEmpty
+            ? 'No supported audio files found. Navika checks MP3, M4A, AAC, WAV, FLAC, OGG, OPUS, AIFF, ALAC, WMA, MIDI and other common formats.'
+            : 'Folder added. Found ${discovered.length} audio file(s); checking for changes every minute.';
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {
       _scanningLocalFolders = false;
+      if (_localFolderScanRequested && mounted) {
+        _localFolderScanRequested = false;
+        final showPendingFeedback = _pendingFolderScanFeedback;
+        _pendingFolderScanFeedback = false;
+        unawaited(_scanLocalFolders(showFeedback: showPendingFeedback));
+      } else if (_localFolders.isEmpty) {
+        _localFolderScanRequested = false;
+        _pendingFolderScanFeedback = false;
+      }
     }
   }
 
@@ -1304,7 +1555,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   : Uri.parse(client!.coverArtUrl(track.coverArt)!)),
       );
       final audioSource = track.isLocal
-          ? AudioSource.file(track.localPath!, tag: mediaItem)
+          ? (track.localPath!.startsWith('content://')
+                ? AudioSource.uri(Uri.parse(track.localPath!), tag: mediaItem)
+                : AudioSource.file(track.localPath!, tag: mediaItem))
           : AudioSource.uri(
               Uri.parse(client!.streamUrl(track.id)),
               tag: mediaItem,
@@ -1495,64 +1748,147 @@ class _HomeScreenState extends State<HomeScreen> {
     required String title,
     required String subtitle,
     required List<MusicTrack> tracks,
+    required bool isArtist,
+    required MusicTrack artworkTrack,
   }) async {
     if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: C.surface,
-      builder: (context) => SafeArea(
-        child: FractionallySizedBox(
-          heightFactor: .88,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(20, 18, 20, 12),
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (pageContext) => Scaffold(
+          backgroundColor: C.bg,
+          body: SafeArea(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: TextStyle(fontFamily: 'SyneBold', fontSize: 25),
+                Padding(
+                  padding: EdgeInsets.fromLTRB(12, 6, 20, 0),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Back',
+                        onPressed: () => Navigator.pop(pageContext),
+                        icon: Icon(Icons.arrow_back_rounded),
                       ),
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-                Text(subtitle, style: TextStyle(color: C.muted, fontSize: 12)),
-                SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${tracks.length} tracks',
-                        style: TextStyle(color: C.muted, fontSize: 12),
+                      SizedBox(width: 8),
+                      Text(
+                        isArtist ? 'ARTIST' : 'ALBUM',
+                        style: TextStyle(
+                          color: C.muted,
+                          fontFamily: 'DMSansBold',
+                          fontSize: 10,
+                          letterSpacing: 1.5,
+                        ),
                       ),
-                    ),
-                    FilledButton.icon(
-                      onPressed: tracks.isEmpty
-                          ? null
-                          : () {
-                              Navigator.pop(context);
-                              _play(tracks.first, playlist: tracks);
-                            },
-                      icon: Icon(Icons.play_arrow_rounded),
-                      label: Text('Play all'),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-                SizedBox(height: 8),
                 Expanded(
                   child: ListView(
-                    children: tracks
-                        .asMap()
-                        .entries
-                        .map((entry) => _trackRow(entry.value, entry.key))
-                        .toList(),
+                    padding: EdgeInsets.fromLTRB(22, 12, 22, 32),
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: _artwork(
+                              artworkTrack.coverArt,
+                              localArtworkPath: artworkTrack.localArtworkPath,
+                              size: 148,
+                              seed: isArtist ? title : artworkTrack.album,
+                            ),
+                          ),
+                          SizedBox(width: 20),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                Text(
+                                  title,
+                                  style: TextStyle(
+                                    fontFamily: 'SyneBold',
+                                    fontSize: 30,
+                                    height: 1.05,
+                                    letterSpacing: -1,
+                                  ),
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  subtitle,
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                SizedBox(height: 5),
+                                Text(
+                                  '${tracks.length} ${tracks.length == 1 ? 'track' : 'tracks'}',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 22),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: FilledButton.icon(
+                          onPressed: tracks.isEmpty
+                              ? null
+                              : () => _play(tracks.first, playlist: tracks),
+                          icon: Icon(Icons.play_arrow_rounded),
+                          label: Text('Play all'),
+                        ),
+                      ),
+                      SizedBox(height: 18),
+                      if (isArtist) ...[
+                        Text(
+                          'DISCOGRAPHY',
+                          style: TextStyle(
+                            color: C.muted,
+                            fontFamily: 'DMSansBold',
+                            fontSize: 10,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                        SizedBox(height: 10),
+                      ],
+                      for (var index = 0; index < tracks.length; index++) ...[
+                        if (isArtist &&
+                            (index == 0 ||
+                                tracks[index].album.toLowerCase() !=
+                                    tracks[index - 1].album.toLowerCase()))
+                          Padding(
+                            padding: EdgeInsets.only(top: index == 0 ? 0 : 14),
+                            child: InkWell(
+                              onTap: () => _openAlbum(tracks[index]),
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(vertical: 5),
+                                child: Text(
+                                  tracks[index].album,
+                                  style: TextStyle(
+                                    fontFamily: 'DMSansBold',
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        _trackRow(tracks[index], index),
+                      ],
+                      if (tracks.isEmpty)
+                        Padding(
+                          padding: EdgeInsets.symmetric(vertical: 30),
+                          child: Text(
+                            'No tracks found in this collection.',
+                            style: TextStyle(color: C.muted),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
@@ -1580,6 +1916,8 @@ class _HomeScreenState extends State<HomeScreen> {
         title: track.album,
         subtitle: track.artist,
         tracks: matches,
+        isArtist: false,
+        artworkTrack: track,
       ),
     );
   }
@@ -1605,6 +1943,8 @@ class _HomeScreenState extends State<HomeScreen> {
         subtitle:
             'Artist · ${matches.map((item) => item.album).toSet().length} albums',
         tracks: matches,
+        isArtist: true,
+        artworkTrack: track,
       ),
     );
   }
@@ -1760,27 +2100,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (!mounted || _playlists.isEmpty) return;
 
+    final playlists = _playlists.keys.toList(growable: false);
     final name = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: C.surface,
       builder: (context) => SafeArea(
-        child: ListView(
+        child: ListView.builder(
           shrinkWrap: true,
-          children: [
-            Padding(
-              padding: EdgeInsets.all(20),
-              child: Text(
-                'Add to playlist',
-                style: TextStyle(fontFamily: 'SyneBold', fontSize: 20),
-              ),
-            ),
-            for (final playlist in _playlists.keys)
-              ListTile(
-                title: Text(playlist),
-                leading: Icon(Icons.queue_music_rounded),
-                onTap: () => Navigator.pop(context, playlist),
-              ),
-          ],
+          itemCount: playlists.length + 1,
+          itemBuilder: (context, index) => index == 0
+              ? Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: const Text(
+                    'Add to playlist',
+                    style: TextStyle(fontFamily: 'SyneBold', fontSize: 20),
+                  ),
+                )
+              : ListTile(
+                  title: Text(playlists[index - 1]),
+                  leading: const Icon(Icons.queue_music_rounded),
+                  onTap: () => Navigator.pop(context, playlists[index - 1]),
+                ),
         ),
       ),
     );
@@ -1864,6 +2204,7 @@ class _HomeScreenState extends State<HomeScreen> {
       unawaited(subscription.cancel());
     }
     _player.dispose();
+    _position.dispose();
     _search.dispose();
     _url.dispose();
     _username.dispose();
@@ -1880,80 +2221,90 @@ class _HomeScreenState extends State<HomeScreen> {
         platform == TargetPlatform.linux;
     final isMacOS = platform == TargetPlatform.macOS;
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle(
-        statusBarColor: C.bg,
-        statusBarIconBrightness: Brightness.light,
-        systemNavigationBarColor: C.bg,
-        systemNavigationBarIconBrightness: Brightness.light,
-      ),
-      child: Scaffold(
-        backgroundColor: C.bg,
-        body: SafeArea(
-          top: !isMacOS && (isDesktop || !_showPlayer),
-          bottom: isDesktop || !_showPlayer,
-          child: Stack(
-            children: [
-              Column(
-                children: [
-                  SizedBox(height: isDesktop ? 54 : 64),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        if (isDesktop) _desktopSidebar(),
-                        Expanded(
-                          child: Column(
-                            children: [
-                              Expanded(child: _content()),
-                              if (_connected && _current != null) _miniPlayer(),
-                            ],
-                          ),
-                        ),
-                      ],
+    return PopScope(
+      canPop: !_shouldHandleSystemBack,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _handleSystemBack();
+      },
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle(
+          statusBarColor: C.bg,
+          statusBarIconBrightness: C.light ? Brightness.dark : Brightness.light,
+          systemNavigationBarColor: C.bg,
+          systemNavigationBarIconBrightness: C.light
+              ? Brightness.dark
+              : Brightness.light,
+        ),
+        child: Scaffold(
+          backgroundColor: C.bg,
+          body: SafeArea(
+            top: !isMacOS && (isDesktop || !_showPlayer),
+            bottom: isDesktop || !_showPlayer,
+            child: Stack(
+              children: [
+                Column(
+                  children: [
+                    if (isDesktop) SizedBox(height: 54),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          if (isDesktop) _desktopSidebar(),
+                          Expanded(child: _content()),
+                        ],
+                      ),
                     ),
-                  ),
-                  if (!isDesktop) _tabBar(),
-                ],
-              ),
-              // Keep settings mounted while closed so its slide transition
-              // can animate both when opening and when dismissing.
-              _settingsOverlay(isMobile: !isDesktop),
-              // Keep the player mounted so its open/close transition can run,
-              // but make the hidden layer transparent to taps.
-              if (_current != null)
-                Positioned(
-                  top: _showPlayer ? 0 : (isDesktop ? 54 : 64),
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: IgnorePointer(
-                    ignoring: !_showPlayer,
-                    child: AnimatedSlide(
-                      offset: _showPlayer ? Offset.zero : Offset(0, 1),
-                      duration: _reduceMotion
-                          ? Duration.zero
-                          : Duration(milliseconds: 320),
-                      curve: Curves.easeOutCubic,
-                      child: AnimatedOpacity(
-                        opacity: _showPlayer ? 1 : 0,
+                    // Playback is independent of the active library mode and
+                    // server connection. Local tracks must keep the mini player
+                    // visible too.
+                    if (_current != null)
+                      ValueListenableBuilder<Duration>(
+                        valueListenable: _position,
+                        builder: (context, _, _) =>
+                            RepaintBoundary(child: _miniPlayer()),
+                      ),
+                    if (!isDesktop) _tabBar(),
+                  ],
+                ),
+                // Keep settings mounted while closed so its slide transition
+                // can animate both when opening and when dismissing.
+                _settingsOverlay(isMobile: !isDesktop),
+                // Keep the player mounted so its open/close transition can run,
+                // but make the hidden layer transparent to taps.
+                if (_current != null)
+                  Positioned(
+                    top: _showPlayer ? 0 : (isDesktop ? 54 : 0),
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: IgnorePointer(
+                      ignoring: !_showPlayer,
+                      child: AnimatedSlide(
+                        offset: _showPlayer ? Offset.zero : Offset(0, 1),
                         duration: _reduceMotion
                             ? Duration.zero
-                            : Duration(milliseconds: 220),
-                        child: _playerOverlay(),
+                            : Duration(milliseconds: 320),
+                        curve: Curves.easeOutCubic,
+                        child: AnimatedOpacity(
+                          opacity: _showPlayer ? 1 : 0,
+                          duration: _reduceMotion
+                              ? Duration.zero
+                              : Duration(milliseconds: 220),
+                          child: _playerOverlay(),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              // Keep the custom app titlebar above the player overlay so it
-              // remains visible and interactive while the player is open.
-              if (!_showPlayer && (isDesktop || !_showSettings))
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: _topBar(isDesktop: isDesktop, isMacOS: isMacOS),
-                ),
-            ],
+                // Keep the custom app titlebar above the player overlay so it
+                // remains visible and interactive while the player is open.
+                if (isDesktop && !_showPlayer)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: _topBar(isDesktop: isDesktop, isMacOS: isMacOS),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -2198,21 +2549,27 @@ class _HomeScreenState extends State<HomeScreen> {
         key: ValueKey(_tab),
         child: SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(22, 28, 22, 30),
-          child: switch (_tab) {
-            AppTab.home => _homePage(),
-            AppTab.search => _searchPage(),
-            AppTab.library => _libraryPage(),
-            AppTab.playlists => _playlistsPage(),
-            AppTab.favorites => _favoritesPage(),
-            AppTab.stats => _statsPage(),
-          },
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 1280),
+              child: switch (_tab) {
+                AppTab.home => _homePage(),
+                AppTab.search => _searchPage(),
+                AppTab.library => _libraryPage(),
+                AppTab.playlists => _playlistsPage(),
+                AppTab.favorites => _favoritesPage(),
+                AppTab.stats => _statsPage(),
+              },
+            ),
+          ),
         ),
       ),
     );
   }
 
   Widget _homePage() {
-    if (!_connected && _localTracks.isEmpty) {
+    if ((_showLocalLibrary && _localTracks.isEmpty) ||
+        (!_showLocalLibrary && !_connected && _modeTracks.isEmpty)) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2227,7 +2584,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           SizedBox(height: 12),
           Text(
-            'Connect your Navidrome server to get started.',
+            'Import music from your device, or connect a Navidrome server if you use one.',
             style: TextStyle(color: C.muted, fontSize: 13, height: 1.6),
           ),
           SizedBox(height: 26),
@@ -2243,14 +2600,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 SizedBox(height: 8),
                 Text(
-                  'Connect Navidrome to explore your library.',
+                  'Add music files or folders from your device. You can also connect Navidrome if you have a server.',
                   style: TextStyle(color: C.muted, fontSize: 13, height: 1.6),
                 ),
                 SizedBox(height: 18),
-                _actionButton(
-                  'Connect server ↗',
-                  onTap: () => _selectTab(AppTab.library),
-                ),
+                _actionButton('Add music', onTap: _importLocalMusic),
               ],
             ),
           ),
@@ -2282,7 +2636,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    if (_libraryLoaded && _tracks.isEmpty) {
+    if (_libraryLoaded && _modeTracks.isEmpty && !_showLocalLibrary) {
       return _emptyState(
         'No tracks found',
         'Your server connected, but no tracks were returned.',
@@ -2395,18 +2749,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-        _sectionTitle('Recently played'),
-        if (_history.isEmpty)
-          Text(
-            'Your recently played music will appear here.',
-            style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
-          )
-        else
-          ..._history.reversed.take(5).map((event) {
-            final track = _tracksById[event.id];
-            if (track == null) return SizedBox.shrink();
-            return _trackRow(track, _history.indexOf(event));
-          }),
+        _recentlyPlayedShelf(),
         _sectionTitle(
           'Your library at a glance',
           action: 'Browse',
@@ -2416,7 +2759,9 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Expanded(
               child: _homeStat(
-                _libraryLoaded ? '${_tracks.length}' : '—',
+                _libraryLoaded || _showLocalLibrary
+                    ? '${_modeTracks.length}'
+                    : '—',
                 'TRACKS',
               ),
             ),
@@ -2428,7 +2773,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(
               child: _homeStat(
                 _libraryLoaded
-                    ? '${_tracks.map((t) => t.artist).toSet().length}'
+                    ? '${_modeTracks.map((t) => t.artist).toSet().length}'
                     : '—',
                 'ARTISTS',
               ),
@@ -2436,7 +2781,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         SizedBox(height: 28),
-        SizedBox(height: 12),
         _sectionTitle('Your artist rotation'),
         if (_mostPlayedArtists.isEmpty)
           Text(
@@ -2448,7 +2792,7 @@ class _HomeScreenState extends State<HomeScreen> {
             spacing: 8,
             runSpacing: 8,
             children: _mostPlayedArtists.map((artist) {
-              final artistTracks = _tracks
+              final artistTracks = _modeTracks
                   .where(
                     (track) =>
                         track.artist.toLowerCase() ==
@@ -2468,47 +2812,23 @@ class _HomeScreenState extends State<HomeScreen> {
             }).toList(),
           ),
         SizedBox(height: 20),
-        _sectionTitle(
+        _recommendationShelf(
           'Picked for you',
-          action: 'Play mix',
-          onAction: () {
-            final picks = _recommended();
-            if (picks.isNotEmpty) _play(picks.first, playlist: picks);
-          },
-        ),
-        Text(
-          _history.isEmpty
+          _recommended(),
+          subtitle: _history.isEmpty
               ? 'A discovery mix from your library. It gets smarter as you listen.'
-              : 'Ranked from your listening patterns and favorites. Your history stays on this device.',
-          style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
+              : 'Ranked from your listening patterns and favorites.',
         ),
-        SizedBox(height: 12),
-        ..._recommended()
-            .take(4)
-            .toList()
-            .asMap()
-            .entries
-            .map((entry) => _trackRow(entry.value, entry.key)),
-        SizedBox(height: 20),
-        _sectionTitle(
+        _recommendationShelf(
           'A little different',
-          action: 'Surprise me',
-          onAction: () {
-            final picks = _discoveryTracks();
-            if (picks.isNotEmpty) _play(picks.first, playlist: picks);
-          },
+          _discoveryTracks(),
+          subtitle:
+              'Less-recently played tracks from artists you already enjoy.',
         ),
-        Text(
-          'Less-recently played tracks from artists you already enjoy.',
-          style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
+        _recommendationShelf(
+          'More from your favorite artists',
+          _tracksFromFavoriteArtists(),
         ),
-        SizedBox(height: 10),
-        ..._discoveryTracks()
-            .take(3)
-            .toList()
-            .asMap()
-            .entries
-            .map((entry) => _trackRow(entry.value, entry.key)),
         SizedBox(height: 20),
         _sectionTitle('Your favorites'),
         if (_favoriteTracks.isEmpty)
@@ -2524,24 +2844,40 @@ class _HomeScreenState extends State<HomeScreen> {
               .entries
               .map((entry) => _trackRow(entry.value, entry.key)),
         SizedBox(height: 20),
-        _sectionTitle(
-          'Recently played',
-          action: 'Your library',
-          onAction: () => _selectTab(AppTab.library),
-        ),
-        SizedBox(
-          height: 174,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            children: _history.reversed.take(8).map((event) {
-              final track = _tracksById[event.id];
-              if (track == null) return SizedBox.shrink();
+      ],
+    );
+  }
 
-              return SizedBox(
-                width: 126,
-                child: Padding(
-                  padding: EdgeInsets.only(right: 14),
+  Widget _recentlyPlayedShelf() {
+    final seen = <String>{};
+    final tracks = _history.reversed
+        .map((event) => _tracksById[event.id])
+        .whereType<MusicTrack>()
+        .where((track) => seen.add(track.id))
+        .take(8)
+        .toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle('Recently played'),
+        if (tracks.isEmpty)
+          Text(
+            'Your recent listens will appear here.',
+            style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
+          )
+        else
+          SizedBox(
+            height: 174,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: tracks.length,
+              separatorBuilder: (_, _) => SizedBox(width: 14),
+              itemBuilder: (context, index) {
+                final track = tracks[index];
+                return SizedBox(
+                  width: 126,
                   child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
                     onTap: () => _play(track),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2572,24 +2908,24 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
-                ),
-              );
-            }).toList(),
+                );
+              },
+            ),
           ),
-        ),
+        SizedBox(height: 26),
       ],
     );
   }
 
   List<MusicTrack> _recommended() {
     final ranked = recommendTracks(
-      _tracks
+      _modeTracks
           .where((track) => !_dismissedRecommendations.contains(track.id))
           .toList(),
       _history,
       currentId: _current?.id,
       favoriteIds: _favorites.toSet(),
-      limit: _tracks.length,
+      limit: _modeTracks.length,
     );
     // Keep a strong listening-history bias from turning the mix into one
     // artist's discography: no more than two of the last five picks per artist.
@@ -2623,7 +2959,7 @@ class _HomeScreenState extends State<HomeScreen> {
         )
         .toList();
     if (picks.isNotEmpty) return picks;
-    return _tracks
+    return _modeTracks
         .where(
           (track) =>
               track.id != _current?.id &&
@@ -2654,7 +2990,7 @@ class _HomeScreenState extends State<HomeScreen> {
         .skip(math.max(0, _history.length - 8))
         .map((event) => event.id)
         .toSet();
-    final picks = _tracks
+    final picks = _modeTracks
         .where(
           (track) =>
               topArtists.take(5).contains(track.artist.toLowerCase()) &&
@@ -2680,7 +3016,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }) {
     final picks = tracks
         .where((track) => !_dismissedRecommendations.contains(track.id))
-        .take(24)
+        .take(8)
         .toList();
     if (picks.isEmpty) return SizedBox.shrink();
     return Column(
@@ -2752,7 +3088,7 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Find your music.',
+          'Find your music',
           style: TextStyle(
             fontFamily: 'SyneBold',
             fontSize: 35,
@@ -2783,12 +3119,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         SizedBox(height: 20),
-        if (!_connected && _searchResults.isEmpty)
+        if (!_connected && _localTracks.isEmpty && _searchResults.isEmpty)
           _emptyState(
-            'Connect your music library',
-            'Connect to Navidrome to search your music.',
-            action: 'Connect server',
-            onTap: () => _selectTab(AppTab.library),
+            'Add music to search',
+            'Import audio files or a music folder to search your local library.',
+            action: 'Add music',
+            onTap: _importLocalMusic,
           )
         else if (_searchError.isNotEmpty)
           _emptyState(
@@ -2807,13 +3143,15 @@ class _HomeScreenState extends State<HomeScreen> {
         else if (_search.text.trim().isEmpty)
           _emptyState(
             'Start typing to search',
-            'Results come directly from your Navidrome server.',
+            _connected
+                ? 'Search your Navidrome library.'
+                : 'Search your imported local music.',
           )
         else if (_searchResults.isEmpty)
           _emptyState('No results found', 'Try a different search.')
         else
           ..._searchResults
-              .take(100)
+              .take(30)
               .toList()
               .asMap()
               .entries
@@ -2823,6 +3161,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _libraryPage() {
+    final libraryTracks = _visibleLibraryTracks;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2834,7 +3173,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Your library.',
+                    'Your library',
                     style: TextStyle(
                       fontFamily: 'SyneBold',
                       fontSize: 35,
@@ -2843,7 +3182,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    'Music from Navidrome and files on this device.',
+                    _showLocalLibrary
+                        ? 'Music files imported from this device.'
+                        : 'Music streamed from your Navidrome server.',
                     style: TextStyle(color: C.muted, fontSize: 13),
                   ),
                 ],
@@ -2872,140 +3213,105 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
           ],
         ),
-        SizedBox(height: 24),
-        if (!_connected && _localTracks.isEmpty)
+        SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () {
+              setState(() {
+                _showLocalLibrary = !_showLocalLibrary;
+                _showLogin = false;
+                _searchResults = [];
+                _searching = false;
+                _searchError = '';
+              });
+              if (!_showLocalLibrary && _connected && !_libraryLoaded) {
+                unawaited(_loadLibrary());
+              }
+              if (_tab == AppTab.search && _search.text.trim().isNotEmpty) {
+                _runSearch(_search.text);
+              }
+            },
+            icon: Icon(
+              _showLocalLibrary ? Icons.dns_outlined : Icons.folder_outlined,
+              size: 18,
+            ),
+            label: Text(
+              'Switch to ${_showLocalLibrary ? 'Navidrome' : 'local music'}',
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: C.lime,
+              padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+          ),
+        ),
+        SizedBox(height: 16),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () => _selectTab(AppTab.favorites),
+              icon: Icon(Icons.favorite_rounded, size: 17),
+              label: Text('Liked songs'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: C.lime,
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => _selectTab(AppTab.stats),
+              icon: Icon(Icons.bar_chart_rounded, size: 17),
+              label: Text('Listening stats'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: C.text,
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 18),
+        if (_showLocalLibrary && libraryTracks.isEmpty)
+          _emptyState(
+            'No local music yet',
+            'Import audio files or choose a folder. Your Navidrome library stays separate.',
+            action: 'Add music',
+            onTap: _importLocalMusic,
+          )
+        else if (!_showLocalLibrary && !_connected)
           _loginCard()
+        else if (_loading && !_showLocalLibrary)
+          Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(color: C.lime),
+            ),
+          )
+        else if (libraryTracks.isEmpty)
+          _emptyState(
+            _showLocalLibrary ? 'No local music yet' : 'No Navidrome tracks',
+            _showLocalLibrary
+                ? 'Import audio files or choose a folder.'
+                : 'Refresh your server library or switch to local music.',
+            action: _showLocalLibrary ? 'Add music' : 'Refresh library',
+            onTap: _showLocalLibrary
+                ? _importLocalMusic
+                : () => _loadLibrary(force: true),
+          )
         else ...[
-          if (_showLogin && !_connected) ...[
-            _loginCard(),
-            SizedBox(height: 18),
-          ],
-          if (_connected) ...[
-          _card(
-            child: Row(
-              children: [
-                Icon(Icons.dns_outlined, color: C.lime, size: 24),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Navidrome',
-                        style: TextStyle(fontFamily: 'DMSansBold'),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        _credentials?.baseUrl ?? '',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: C.muted, fontSize: 11),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'Connected as ${_credentials?.username ?? ''}',
-                        style: TextStyle(color: C.muted, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
-                TextButton(onPressed: _logout, child: Text('Log out')),
-              ],
-            ),
+          _recommendationShelf('Recently played', _recentlyPlayedTracks()),
+          _recommendationShelf(
+            'Picked for you',
+            _recommended(),
+            subtitle: 'A mix shaped by your listening and favorites.',
           ),
-          SizedBox(height: 12),
-          ],
-          Row(
-            children: [
-              Expanded(child: _homeStat('${_tracks.length}', 'ALL TRACKS')),
-              SizedBox(width: 10),
-              Expanded(
-                child: _homeStat(
-                  '${_tracks.map((t) => t.artist).toSet().length}',
-                  'ARTISTS',
-                ),
-              ),
-              SizedBox(width: 10),
-              Expanded(child: _homeStat('$_albumCount', 'ALBUMS')),
-            ],
+          _recommendationShelf('A little different', _discoveryTracks()),
+          _recommendationShelf(
+            'More from your favorite artists',
+            _tracksFromFavoriteArtists(),
           ),
-          SizedBox(height: 26),
-          if (_loading)
-            Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(color: C.lime),
-              ),
-            )
-          else if (_connected && _libraryError.isNotEmpty)
-            _emptyState(
-              'Library unavailable',
-              _libraryError,
-              action: 'Retry',
-              onTap: () => _loadLibrary(force: true),
-            )
-          else if (_tracks.isEmpty)
-            _emptyState(
-              'Your library is empty',
-              'Add music files or choose a folder to start your library.',
-              action: 'Add music',
-              onTap: _importLocalMusic,
-            )
-          else ...[
-            if (_connected) ...[
-            _recommendationShelf('Made for you', _recommended()),
-            SizedBox(height: 26),
-            _recommendationShelf(
-              'More from your favorite artists',
-              _tracksFromFavoriteArtists(),
-              subtitle: 'Artists you keep coming back to',
-            ),
-            SizedBox(height: 26),
-            _recommendationShelf(
-              'Rediscover your rotation',
-              _recentlyPlayedTracks(),
-              subtitle: 'Tracks you have listened to before',
-            ),
-            SizedBox(height: 26),
-            _recommendationShelf(
-              'Something new for you',
-              _discoveryTracks(),
-              subtitle: 'Familiar sounds, with a little variety',
-            ),
-            if (_favoriteTracks.isNotEmpty) ...[
-              SizedBox(height: 26),
-              _recommendationShelf(
-                'Your favorites',
-                _favoriteTracks,
-                subtitle: 'The tracks you saved',
-              ),
-            ],
-          ],
-          SizedBox(height: 26),
-          _sectionTitle(
-              'All music',
-              action: 'Add music',
-              onAction: _importLocalMusic,
-          ),
-            Text(
-              'Songs from your server and this device, together.',
-              style: TextStyle(color: C.muted, fontSize: 11),
-            ),
+          if (!_showLocalLibrary && _connected) ...[
             SizedBox(height: 8),
-            ..._tracks.asMap().entries.map(
-              (entry) => _trackRow(entry.value, entry.key),
-            ),
-          ],
-          if (_localFolders.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.only(top: 12),
-              child: Text(
-                '${_localFolders.length} watched folder(s) · includes nested folders · refreshes automatically',
-                style: TextStyle(color: C.muted, fontSize: 11),
-              ),
-            ),
-          if (_connected) ...[
-            SizedBox(height: 18),
             _actionButton('Refresh library', onTap: _loadLibrary),
           ],
         ],
@@ -3111,7 +3417,7 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Your playlists.',
+          'Your playlists',
           style: TextStyle(
             fontFamily: 'SyneBold',
             fontSize: 35,
@@ -3124,12 +3430,12 @@ class _HomeScreenState extends State<HomeScreen> {
           style: TextStyle(color: C.muted, fontSize: 13, height: 1.6),
         ),
         SizedBox(height: 22),
-        if (!_connected)
+        if (_modeTracks.isEmpty)
           _emptyState(
-            'Connect your music library',
-            'Your playlists need tracks from your Navidrome server.',
-            action: 'Connect server',
-            onTap: () => _selectTab(AppTab.library),
+            'Add music to make playlists',
+            'Import local audio files or a music folder, then create playlists from your collection.',
+            action: 'Add music',
+            onTap: _importLocalMusic,
           )
         else ...[
           SizedBox(
@@ -3285,15 +3591,14 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: C.surface,
       isScrollControlled: true,
       builder: (_) => _PlaylistTrackPicker(
-        tracks: _tracks,
+        tracks: _modeTracks,
         existingIds: _playlists[playlist]!.toSet(),
-        artwork: (track) =>
-            _artwork(
-              track.coverArt,
-              localArtworkPath: track.localArtworkPath,
-              size: 42,
-              seed: track.album,
-            ),
+        artwork: (track) => _artwork(
+          track.coverArt,
+          localArtworkPath: track.localArtworkPath,
+          size: 42,
+          seed: track.album,
+        ),
       ),
     );
 
@@ -3397,7 +3702,7 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Your favorites.',
+          'Your favorites',
           style: TextStyle(
             fontFamily: 'SyneBold',
             fontSize: 35,
@@ -3425,13 +3730,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _statsPage() {
     final albums = _albumCount;
-    final artists = _tracks.map((track) => track.artist).toSet().length;
+    final artists = _modeTracks.map((track) => track.artist).toSet().length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Your listening.',
+          'Your listening',
           style: TextStyle(
             fontFamily: 'SyneBold',
             fontSize: 35,
@@ -3455,7 +3760,7 @@ class _HomeScreenState extends State<HomeScreen> {
               runSpacing: spacing,
               children: [
                 _statCard(
-                  '${_tracks.length}',
+                  '${_modeTracks.length}',
                   'TRACKS IN LIBRARY',
                   width: cardWidth,
                 ),
@@ -3516,7 +3821,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _miniPlayer() {
     final track = _current!;
     final duration = _player.duration?.inMilliseconds ?? 0;
-    final position = _player.position.inMilliseconds;
+    final position = _position.value.inMilliseconds;
     final progress = duration == 0
         ? 0.0
         : (position / duration).clamp(0.0, 1.0);
@@ -3635,56 +3940,61 @@ class _HomeScreenState extends State<HomeScreen> {
         border: Border(top: BorderSide(color: C.border)),
       ),
       child: Row(
-        children: AppTab.values.map((tab) {
-          final active = _tab == tab;
+        children: [AppTab.home, AppTab.search, AppTab.library, AppTab.playlists]
+            .map((tab) {
+              final active =
+                  _tab == tab ||
+                  (tab == AppTab.library &&
+                      (_tab == AppTab.favorites || _tab == AppTab.stats));
 
-          return Expanded(
-            child: InkWell(
-              onTap: () => _selectTab(tab),
-              child: SizedBox(
-                height: 70,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+              return Expanded(
+                child: InkWell(
+                  onTap: () => _selectTab(tab),
+                  child: SizedBox(
+                    height: 70,
+                    child: Stack(
+                      alignment: Alignment.center,
                       children: [
-                        Icon(
-                          tab.icon,
-                          size: 22,
-                          color: active ? C.lime : C.muted,
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              tab.icon,
+                              size: 22,
+                              color: active ? C.lime : C.muted,
+                            ),
+                            SizedBox(height: 3),
+                            Text(
+                              tab.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.clip,
+                              style: TextStyle(
+                                fontFamily: 'DMSansMedium',
+                                fontSize: 9,
+                                color: active ? C.lime : C.muted,
+                              ),
+                            ),
+                          ],
                         ),
-                        SizedBox(height: 3),
-                        Text(
-                          tab.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.clip,
-                          style: TextStyle(
-                            fontFamily: 'DMSansMedium',
-                            fontSize: 9,
-                            color: active ? C.lime : C.muted,
+                        if (active)
+                          Positioned(
+                            bottom: 0,
+                            child: Container(
+                              width: 18,
+                              height: 2,
+                              decoration: BoxDecoration(
+                                color: C.lime,
+                                borderRadius: BorderRadius.circular(1),
+                              ),
+                            ),
                           ),
-                        ),
                       ],
                     ),
-                    if (active)
-                      Positioned(
-                        bottom: 0,
-                        child: Container(
-                          width: 18,
-                          height: 2,
-                          decoration: BoxDecoration(
-                            color: C.lime,
-                            borderRadius: BorderRadius.circular(1),
-                          ),
-                        ),
-                      ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-          );
-        }).toList(),
+              );
+            })
+            .toList(),
       ),
     );
   }
@@ -4011,6 +4321,81 @@ class _HomeScreenState extends State<HomeScreen> {
                                   _loadLibrary(force: true);
                                 },
                               ),
+                              Padding(
+                                padding: EdgeInsets.only(top: 8, bottom: 4),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        'Music folders',
+                                        style: TextStyle(
+                                          fontFamily: 'DMSansMedium',
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ),
+                                    TextButton.icon(
+                                      onPressed: _importLocalFolder,
+                                      icon: Icon(
+                                        Icons.create_new_folder_outlined,
+                                        size: 16,
+                                      ),
+                                      label: Text('Add folder'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (_localFolders.isEmpty)
+                                Padding(
+                                  padding: EdgeInsets.only(bottom: 10),
+                                  child: Text(
+                                    'No watched folders. Add one to keep local music updated automatically.',
+                                    style: TextStyle(
+                                      color: C.muted,
+                                      fontSize: 10,
+                                      height: 1.5,
+                                    ),
+                                  ),
+                                )
+                              else
+                                ..._localFolders.map(
+                                  (folder) => ListTile(
+                                    dense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: Icon(
+                                      Icons.folder_outlined,
+                                      color: C.muted,
+                                      size: 19,
+                                    ),
+                                    title: Text(
+                                      _folderDisplayName(folder),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                    subtitle: Text(
+                                      folder.startsWith('saf:')
+                                          ? 'Android · scans nested folders'
+                                          : folder,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: C.muted,
+                                        fontSize: 9,
+                                      ),
+                                    ),
+                                    trailing: IconButton(
+                                      tooltip: 'Remove folder',
+                                      onPressed: () =>
+                                          _removeLocalFolder(folder),
+                                      icon: Icon(
+                                        Icons.remove_circle_outline_rounded,
+                                        color: C.danger,
+                                        size: 19,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 title: Text(
@@ -4128,11 +4513,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
     final duration =
         _player.duration?.inSeconds.toDouble() ?? track.duration.toDouble();
-    final position = _player.position.inSeconds.toDouble();
-    final progress = duration <= 0
-        ? 0.0
-        : (position / duration).clamp(0.0, 1.0);
-
     final ambientColors = _playerAmbientColors();
     return Material(
       color: Colors.transparent,
@@ -4230,690 +4610,330 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     child: LayoutBuilder(
                       key: ValueKey(_showUpNext),
-                    builder: (context, constraints) {
-                      final artSize = (constraints.maxWidth * .72).clamp(
-                        220.0,
-                        390.0,
-                      );
+                      builder: (context, constraints) {
+                        final artSize = (constraints.maxWidth * .72).clamp(
+                          220.0,
+                          390.0,
+                        );
 
-                      if (constraints.maxWidth > 680) {
-                        // Keep enough room for the seek bar and controls in
-                        // shorter windows to avoid a bottom RenderFlex overflow.
-                        final desktopArtSize = (constraints.maxHeight * .58)
-                            .clamp(220.0, 390.0);
-                        if (_showUpNext) {
-                          return Padding(
-                            padding: EdgeInsets.fromLTRB(28, 12, 28, 12),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Expanded(
-                                  flex: 6,
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'NOW PLAYING',
-                                        style: TextStyle(
-                                          color: C.muted,
-                                          fontSize: 9,
-                                          letterSpacing: 1.3,
-                                          fontFamily: 'DMSansBold',
-                                        ),
-                                      ),
-                                      Spacer(),
-                                      Center(
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          child: _artwork(
-                                            track.coverArt,
-                                            localArtworkPath: track.localArtworkPath,
-                                            size: desktopArtSize,
-                                            seed: track.album,
+                        if (constraints.maxWidth > 680) {
+                          // Keep enough room for the seek bar and controls in
+                          // shorter windows to avoid a bottom RenderFlex overflow.
+                          final desktopArtSize = (constraints.maxHeight * .58)
+                              .clamp(220.0, 390.0);
+                          if (_showUpNext) {
+                            return Padding(
+                              padding: EdgeInsets.fromLTRB(28, 12, 28, 12),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Expanded(
+                                    flex: 6,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'NOW PLAYING',
+                                          style: TextStyle(
+                                            color: C.muted,
+                                            fontSize: 9,
+                                            letterSpacing: 1.3,
+                                            fontFamily: 'DMSansBold',
                                           ),
                                         ),
-                                      ),
-                                      SizedBox(height: 12),
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              track.title,
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                fontFamily: 'SyneBold',
-                                                fontSize: 22,
-                                                height: 1.0,
-                                              ),
+                                        Spacer(),
+                                        Center(
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              12,
                                             ),
-                                          ),
-                                          IconButton(
-                                            onPressed: () =>
-                                                _toggleFavorite(track),
-                                            icon: Icon(
-                                              _favorites.contains(track.id)
-                                                  ? Icons.favorite_rounded
-                                                  : Icons
-                                                        .favorite_border_rounded,
-                                              color: C.lime,
+                                            child: _artwork(
+                                              track.coverArt,
+                                              localArtworkPath:
+                                                  track.localArtworkPath,
+                                              size: desktopArtSize,
+                                              seed: track.album,
                                             ),
-                                          ),
-                                        ],
-                                      ),
-                                      SizedBox(height: 4),
-                                      Text(
-                                        '${track.artist} · ${track.album}',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: C.muted,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                      SizedBox(height: 8),
-                                      _seekBar(progress, duration),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            _formatTime(position),
-                                            style: TextStyle(
-                                              color: C.muted,
-                                              fontSize: 10,
-                                            ),
-                                          ),
-                                          Text(
-                                            _formatTime(duration),
-                                            style: TextStyle(
-                                              color: C.muted,
-                                              fontSize: 10,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      SizedBox(height: 0),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          IconButton(
-                                            onPressed: _toggleShuffle,
-                                            icon: Icon(
-                                              Icons.shuffle_rounded,
-                                              color: _shuffle
-                                                  ? C.lime
-                                                  : C.muted,
-                                            ),
-                                          ),
-                                          IconButton(
-                                            onPressed: () => _skip(-1),
-                                            icon: Icon(
-                                              Icons.skip_previous_rounded,
-                                              size: 27,
-                                            ),
-                                          ),
-                                          IconButton(
-                                            onPressed: _togglePlayback,
-                                            icon: Icon(
-                                              _player.playing
-                                                  ? Icons
-                                                        .pause_circle_filled_rounded
-                                                  : Icons
-                                                        .play_circle_fill_rounded,
-                                              color: C.lime,
-                                              size: 54,
-                                            ),
-                                          ),
-                                          IconButton(
-                                            onPressed: () => _skip(1),
-                                            icon: Icon(
-                                              Icons.skip_next_rounded,
-                                              size: 27,
-                                            ),
-                                          ),
-                                          IconButton(
-                                            onPressed: _cycleRepeatMode,
-                                            icon: Icon(
-                                              Icons.repeat_rounded,
-                                              color: _repeatAll
-                                                  ? C.lime
-                                                  : C.muted,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                SizedBox(width: 28),
-                                Container(width: 1, color: C.border),
-                                SizedBox(width: 24),
-                                Expanded(
-                                  flex: 4,
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              'Up next',
-                                              style: TextStyle(
-                                                fontFamily: 'SyneBold',
-                                                fontSize: 22,
-                                              ),
-                                            ),
-                                          ),
-                                          IconButton(
-                                            tooltip: 'Close Up Next',
-                                            onPressed: () => setState(
-                                              () => _showUpNext = false,
-                                            ),
-                                            icon: Icon(Icons.close_rounded),
-                                          ),
-                                          TextButton(
-                                            onPressed: _clearUpcoming,
-                                            child: Text('Clear'),
-                                          ),
-                                        ],
-                                      ),
-                                      SizedBox(height: 8),
-                                      Text(
-                                        'NOW PLAYING',
-                                        style: TextStyle(
-                                          color: C.muted,
-                                          fontSize: 9,
-                                          letterSpacing: 1.1,
-                                        ),
-                                      ),
-                                      SizedBox(height: 10),
-                                      Container(
-                                        padding: EdgeInsets.all(10),
-                                        decoration: BoxDecoration(
-                                          color: C.surface,
-                                          borderRadius: BorderRadius.circular(
-                                            10,
                                           ),
                                         ),
-                                        child: Row(
+                                        SizedBox(height: 12),
+                                        Row(
                                           children: [
-                                            ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(5),
-                                              child: _artwork(
-                                                track.coverArt,
-                                                localArtworkPath: track.localArtworkPath,
-                                                size: 42,
-                                                seed: track.album,
-                                              ),
-                                            ),
-                                            SizedBox(width: 10),
                                             Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    track.title,
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                        fontFamily:
-                                                            'DMSansBold',
-                                                    ),
-                                                  ),
-                                                  Text(
-                                                    track.artist,
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: TextStyle(
-                                                      color: C.muted,
-                                                      fontSize: 10,
-                                                    ),
-                                                  ),
-                                                ],
+                                              child: Text(
+                                                track.title,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  fontFamily: 'SyneBold',
+                                                  fontSize: 22,
+                                                  height: 1.0,
+                                                ),
                                               ),
                                             ),
-                                            Icon(
-                                              Icons.graphic_eq_rounded,
-                                              color: C.lime,
-                                              size: 17,
+                                            IconButton(
+                                              onPressed: () =>
+                                                  _toggleFavorite(track),
+                                              icon: Icon(
+                                                _favorites.contains(track.id)
+                                                    ? Icons.favorite_rounded
+                                                    : Icons
+                                                          .favorite_border_rounded,
+                                                color: C.lime,
+                                              ),
                                             ),
                                           ],
                                         ),
-                                      ),
-                                      SizedBox(height: 22),
-                                      Text(
-                                        'NEXT IN QUEUE',
-                                        style: TextStyle(
-                                          color: C.muted,
-                                          fontSize: 9,
-                                          letterSpacing: 1.1,
-                                        ),
-                                      ),
-                                      SizedBox(height: 8),
-                                      Expanded(
-                                        child: ListView(
-                                          children: _queue
-                                              .skip(_queueIndex + 1)
-                                              .take(30)
-                                              .toList()
-                                              .asMap()
-                                              .entries
-                                              .map(
-                                                (entry) => _trackRow(
-                                                  entry.value,
-                                                  _queueIndex + entry.key + 1,
-                                                ),
-                                              )
-                                              .toList(),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }
-                        return SingleChildScrollView(
-                          padding: EdgeInsets.fromLTRB(28, 20, 28, 16),
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              minHeight: constraints.maxHeight - 36,
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: _artwork(
-                                    track.coverArt,
-                                    localArtworkPath: track.localArtworkPath,
-                                    size: desktopArtSize,
-                                    seed: track.album,
-                                  ),
-                                ),
-                                SizedBox(width: 30),
-                                Expanded(
-                                  child: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        track.title,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontFamily: 'SyneBold',
-                                          fontSize: 27,
-                                          letterSpacing: -.8,
-                                        ),
-                                      ),
-                                      SizedBox(height: 7),
-                                      InkWell(
-                                        onTap: () => _openArtist(track),
-                                        child: Text(
-                                          track.artist,
+                                        SizedBox(height: 4),
+                                        Text(
+                                          '${track.artist} · ${track.album}',
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                             color: C.muted,
-                                            fontSize: 14,
+                                            fontSize: 12,
                                           ),
                                         ),
-                                      ),
-                                      SizedBox(height: 4),
-                                      InkWell(
-                                        onTap: () => _openAlbum(track),
-                                        child: Text(
-                                          track.album,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: C.muted,
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                      ),
-                                      if (_showVisualizer) ...[
-                                        SizedBox(height: 12),
-                                        _visualizer(),
-                                      ],
-                                      Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: IconButton(
-                                          tooltip: 'Toggle favorite',
-                                          onPressed: () =>
-                                              _toggleFavorite(track),
-                                          icon: Icon(
-                                            _favorites.contains(track.id)
-                                                ? Icons.favorite_rounded
-                                                  : Icons
-                                                        .favorite_border_rounded,
-                                              color:
-                                                  _favorites.contains(track.id)
-                                                ? C.lime
-                                                : C.muted,
-                                          ),
-                                        ),
-                                      ),
-                                      SizedBox(height: 8),
-                                      _seekBar(progress, duration),
-                                      SizedBox(height: 8),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            _formatTime(position),
-                                            style: TextStyle(
-                                              color: C.muted,
-                                              fontSize: 10,
-                                            ),
-                                          ),
-                                          Text(
-                                            _formatTime(duration),
-                                            style: TextStyle(
-                                              color: C.muted,
-                                              fontSize: 10,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      SizedBox(height: 10),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          IconButton(
-                                            tooltip: 'Shuffle',
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            constraints: BoxConstraints(
-                                              minWidth: 40,
-                                              minHeight: 40,
-                                            ),
-                                            onPressed: _toggleShuffle,
-                                            icon: Icon(
-                                              Icons.shuffle_rounded,
-                                              color: _shuffle
-                                                  ? C.lime
-                                                  : C.muted,
-                                            ),
-                                          ),
-                                          IconButton(
-                                            tooltip: 'Previous track',
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            constraints: BoxConstraints(
-                                              minWidth: 40,
-                                              minHeight: 40,
-                                            ),
-                                            onPressed: () => _skip(-1),
-                                            icon: Icon(
-                                              Icons.skip_previous_rounded,
-                                              size: 26,
-                                            ),
-                                          ),
-                                          InkWell(
-                                              borderRadius:
-                                                  BorderRadius.circular(40),
-                                            onTap: _togglePlayback,
-                                            child: Container(
-                                              width: 50,
-                                              height: 50,
-                                              decoration: BoxDecoration(
-                                                color: C.lime,
-                                                shape: BoxShape.circle,
+                                        SizedBox(height: 8),
+                                        _playbackProgress(duration),
+                                        SizedBox(height: 0),
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            IconButton(
+                                              onPressed: _toggleShuffle,
+                                              icon: Icon(
+                                                Icons.shuffle_rounded,
+                                                color: _shuffle
+                                                    ? C.lime
+                                                    : C.muted,
                                               ),
-                                              child: Icon(
+                                            ),
+                                            IconButton(
+                                              onPressed: () => _skip(-1),
+                                              icon: Icon(
+                                                Icons.skip_previous_rounded,
+                                                size: 27,
+                                              ),
+                                            ),
+                                            IconButton(
+                                              onPressed: _togglePlayback,
+                                              icon: Icon(
                                                 _player.playing
-                                                    ? Icons.pause_rounded
-                                                      : Icons
-                                                            .play_arrow_rounded,
-                                                color: C.black,
-                                                size: 25,
+                                                    ? Icons
+                                                          .pause_circle_filled_rounded
+                                                    : Icons
+                                                          .play_circle_fill_rounded,
+                                                color: C.lime,
+                                                size: 54,
                                               ),
                                             ),
-                                          ),
-                                          IconButton(
-                                            tooltip: 'Next track',
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            constraints: BoxConstraints(
-                                              minWidth: 40,
-                                              minHeight: 40,
+                                            IconButton(
+                                              onPressed: () => _skip(1),
+                                              icon: Icon(
+                                                Icons.skip_next_rounded,
+                                                size: 27,
+                                              ),
                                             ),
-                                            onPressed: () => _skip(1),
-                                            icon: Icon(
-                                              Icons.skip_next_rounded,
-                                              size: 26,
+                                            IconButton(
+                                              onPressed: _cycleRepeatMode,
+                                              icon: Icon(
+                                                Icons.repeat_rounded,
+                                                color: _repeatAll
+                                                    ? C.lime
+                                                    : C.muted,
+                                              ),
                                             ),
-                                          ),
-                                          IconButton(
-                                            tooltip: 'Repeat mode',
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            constraints: BoxConstraints(
-                                              minWidth: 40,
-                                              minHeight: 40,
-                                            ),
-                                            onPressed: _cycleRepeatMode,
-                                            icon: Icon(
-                                              Icons.repeat_rounded,
-                                                color:
-                                                    (_repeatAll || _repeatOne)
-                                                  ? C.lime
-                                                  : C.muted,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: OutlinedButton.icon(
-                                          onPressed: () => setState(
-                                            () => _showUpNext = true,
-                                          ),
-                                            icon: Icon(
-                                              Icons.queue_music_rounded,
-                                            ),
-                                          label: Text(
-                                            'Up Next · ${_queue.length - _queueIndex - 1}',
-                                          ),
+                                          ],
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }
-
-                      return SingleChildScrollView(
-                        padding: EdgeInsets.fromLTRB(22, 16, 22, 10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (_showUpNext) ...[
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      'Up next',
-                                      style: TextStyle(
-                                        fontFamily: 'SyneBold',
-                                        fontSize: 22,
-                                      ),
+                                      ],
                                     ),
                                   ),
-                                  IconButton(
-                                    tooltip: 'Close Up Next',
-                                    onPressed: () =>
-                                        setState(() => _showUpNext = false),
-                                    icon: Icon(Icons.close_rounded),
-                                  ),
-                                  PopupMenuButton<String>(
-                                    onSelected: (value) {
-                                      if (value == 'clear') _clearUpcoming();
-                                      if (value == 'save') {
-                                        _saveQueueAsPlaylist();
-                                      }
-                                    },
-                                    itemBuilder: (_) => [
-                                      PopupMenuItem(
-                                        value: 'clear',
-                                        child: Text('Clear upcoming tracks'),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'save',
-                                        child: Text('Save queue as playlist'),
-                                      ),
-                                    ],
-                                    icon: Icon(Icons.more_vert_rounded),
+                                  SizedBox(width: 28),
+                                  Container(width: 1, color: C.border),
+                                  SizedBox(width: 24),
+                                  Expanded(
+                                    flex: 4,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                'Up next',
+                                                style: TextStyle(
+                                                  fontFamily: 'SyneBold',
+                                                  fontSize: 22,
+                                                ),
+                                              ),
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Close Up Next',
+                                              onPressed: () => setState(
+                                                () => _showUpNext = false,
+                                              ),
+                                              icon: Icon(Icons.close_rounded),
+                                            ),
+                                            TextButton(
+                                              onPressed: _clearUpcoming,
+                                              child: Text('Clear'),
+                                            ),
+                                          ],
+                                        ),
+                                        SizedBox(height: 8),
+                                        Text(
+                                          'NOW PLAYING',
+                                          style: TextStyle(
+                                            color: C.muted,
+                                            fontSize: 9,
+                                            letterSpacing: 1.1,
+                                          ),
+                                        ),
+                                        SizedBox(height: 10),
+                                        Container(
+                                          padding: EdgeInsets.all(10),
+                                          decoration: BoxDecoration(
+                                            color: C.surface,
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(5),
+                                                child: _artwork(
+                                                  track.coverArt,
+                                                  localArtworkPath:
+                                                      track.localArtworkPath,
+                                                  size: 42,
+                                                  seed: track.album,
+                                                ),
+                                              ),
+                                              SizedBox(width: 10),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      track.title,
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        fontFamily:
+                                                            'DMSansBold',
+                                                      ),
+                                                    ),
+                                                    Text(
+                                                      track.artist,
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: TextStyle(
+                                                        color: C.muted,
+                                                        fontSize: 10,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              Icon(
+                                                Icons.graphic_eq_rounded,
+                                                color: C.lime,
+                                                size: 17,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        SizedBox(height: 22),
+                                        Text(
+                                          'NEXT IN QUEUE',
+                                          style: TextStyle(
+                                            color: C.muted,
+                                            fontSize: 9,
+                                            letterSpacing: 1.1,
+                                          ),
+                                        ),
+                                        SizedBox(height: 8),
+                                        Expanded(
+                                          child: ListView.builder(
+                                            itemCount: math.min(
+                                              30,
+                                              math.max(
+                                                0,
+                                                _queue.length - _queueIndex - 1,
+                                              ),
+                                            ),
+                                            itemBuilder: (context, index) =>
+                                                _trackRow(
+                                                  _queue[_queueIndex +
+                                                      index +
+                                                      1],
+                                                  _queueIndex + index + 1,
+                                                ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ),
-                              ..._queue
-                                  .asMap()
-                                  .entries
-                                  .where((entry) => entry.key > _queueIndex)
-                                  .take(100)
-                                  .map(
-                                    (entry) => ListTile(
-                                      dense: true,
-                                      contentPadding: EdgeInsets.zero,
-                                      leading: _artwork(
-                                        entry.value.coverArt,
-                                        localArtworkPath: entry.value.localArtworkPath,
-                                        size: 42,
-                                        seed: entry.value.album,
-                                      ),
-                                      title: Text(
-                                        entry.value.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      subtitle: Text(
-                                        '${entry.value.artist} · ${entry.value.album}',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      onTap: () => _play(entry.value),
-                                      trailing: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          IconButton(
-                                            tooltip: 'Move up',
-                                            onPressed:
-                                                entry.key > _queueIndex + 1
-                                                ? () => _moveQueueItem(
-                                                    entry.key,
-                                                    entry.key - 1,
-                                                  )
-                                                : null,
-                                            icon: Icon(
-                                              Icons.arrow_upward_rounded,
-                                              size: 17,
-                                            ),
-                                          ),
-                                          IconButton(
-                                            tooltip: 'Move down',
-                                            onPressed:
-                                                entry.key < _queue.length - 1
-                                                ? () => _moveQueueItem(
-                                                    entry.key,
-                                                    entry.key + 1,
-                                                  )
-                                                : null,
-                                            icon: Icon(
-                                              Icons.arrow_downward_rounded,
-                                              size: 17,
-                                            ),
-                                          ),
-                                          IconButton(
-                                            tooltip: 'Remove from queue',
-                                            onPressed: () =>
-                                                _removeFromQueue(entry.key),
-                                            icon: Icon(
-                                              Icons.close_rounded,
-                                              size: 18,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                              if (_queueIndex >= _queue.length - 1)
-                                Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 14),
-                                  child: Text(
-                                    "You're at the end of the queue.",
-                                    style: TextStyle(
-                                      color: C.muted,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                            ] else ...[
-                              Column(
+                            );
+                          }
+                          return SingleChildScrollView(
+                            padding: EdgeInsets.fromLTRB(28, 20, 28, 16),
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight: constraints.maxHeight - 36,
+                              ),
+                              child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
                                   ClipRRect(
-                                    borderRadius: BorderRadius.circular(10),
+                                    borderRadius: BorderRadius.circular(12),
                                     child: _artwork(
                                       track.coverArt,
                                       localArtworkPath: track.localArtworkPath,
-                                      size: artSize,
+                                      size: desktopArtSize,
                                       seed: track.album,
                                     ),
                                   ),
-                                  SizedBox(height: 18),
-                                  SizedBox(
-                                    width: double.infinity,
+                                  SizedBox(width: 30),
+                                  Expanded(
                                     child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       crossAxisAlignment:
-                                          CrossAxisAlignment.center,
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           track.title,
-                                          maxLines: 3,
+                                          maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
                                           style: TextStyle(
                                             fontFamily: 'SyneBold',
-                                            fontSize: 21,
-                                            letterSpacing: -.7,
+                                            fontSize: 27,
+                                            letterSpacing: -.8,
                                           ),
                                         ),
-                                        SizedBox(height: 6),
+                                        SizedBox(height: 7),
                                         InkWell(
                                           onTap: () => _openArtist(track),
                                           child: Text(
                                             track.artist,
-                                            maxLines: 2,
+                                            maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
-                                            textAlign: TextAlign.center,
                                             style: TextStyle(
                                               color: C.muted,
-                                              fontSize: 13,
-                                              decoration:
-                                                  TextDecoration.underline,
-                                              decorationColor: C.border,
+                                              fontSize: 14,
                                             ),
                                           ),
                                         ),
@@ -4922,38 +4942,140 @@ class _HomeScreenState extends State<HomeScreen> {
                                           onTap: () => _openAlbum(track),
                                           child: Text(
                                             track.album,
-                                            maxLines: 2,
+                                            maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
-                                            textAlign: TextAlign.center,
                                             style: TextStyle(
                                               color: C.muted,
                                               fontSize: 11,
-                                              decoration:
-                                                  TextDecoration.underline,
-                                              decorationColor: C.border,
                                             ),
                                           ),
                                         ),
                                         if (_showVisualizer) ...[
-                                          SizedBox(height: 8),
+                                          SizedBox(height: 12),
                                           _visualizer(),
                                         ],
-                                        SizedBox(height: 10),
-                                        IconButton(
-                                          alignment: Alignment.center,
-                                          padding: EdgeInsets.zero,
-                                          onPressed: () =>
-                                              _toggleFavorite(track),
-                                          icon: Icon(
-                                            _favorites.contains(track.id)
-                                                ? Icons.favorite_rounded
+                                        Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: IconButton(
+                                            tooltip: 'Toggle favorite',
+                                            onPressed: () =>
+                                                _toggleFavorite(track),
+                                            icon: Icon(
+                                              _favorites.contains(track.id)
+                                                  ? Icons.favorite_rounded
                                                   : Icons
                                                         .favorite_border_rounded,
                                               color:
                                                   _favorites.contains(track.id)
-                                                ? C.lime
-                                                : C.muted,
-                                            size: 24,
+                                                  ? C.lime
+                                                  : C.muted,
+                                            ),
+                                          ),
+                                        ),
+                                        SizedBox(height: 8),
+                                        _playbackProgress(duration),
+                                        SizedBox(height: 8),
+                                        SizedBox(height: 10),
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            IconButton(
+                                              tooltip: 'Shuffle',
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                              constraints: BoxConstraints(
+                                                minWidth: 40,
+                                                minHeight: 40,
+                                              ),
+                                              onPressed: _toggleShuffle,
+                                              icon: Icon(
+                                                Icons.shuffle_rounded,
+                                                color: _shuffle
+                                                    ? C.lime
+                                                    : C.muted,
+                                              ),
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Previous track',
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                              constraints: BoxConstraints(
+                                                minWidth: 40,
+                                                minHeight: 40,
+                                              ),
+                                              onPressed: () => _skip(-1),
+                                              icon: Icon(
+                                                Icons.skip_previous_rounded,
+                                                size: 26,
+                                              ),
+                                            ),
+                                            InkWell(
+                                              borderRadius:
+                                                  BorderRadius.circular(40),
+                                              onTap: _togglePlayback,
+                                              child: Container(
+                                                width: 50,
+                                                height: 50,
+                                                decoration: BoxDecoration(
+                                                  color: C.lime,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                child: Icon(
+                                                  _player.playing
+                                                      ? Icons.pause_rounded
+                                                      : Icons
+                                                            .play_arrow_rounded,
+                                                  color: C.black,
+                                                  size: 25,
+                                                ),
+                                              ),
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Next track',
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                              constraints: BoxConstraints(
+                                                minWidth: 40,
+                                                minHeight: 40,
+                                              ),
+                                              onPressed: () => _skip(1),
+                                              icon: Icon(
+                                                Icons.skip_next_rounded,
+                                                size: 26,
+                                              ),
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Repeat mode',
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                              constraints: BoxConstraints(
+                                                minWidth: 40,
+                                                minHeight: 40,
+                                              ),
+                                              onPressed: _cycleRepeatMode,
+                                              icon: Icon(
+                                                Icons.repeat_rounded,
+                                                color:
+                                                    (_repeatAll || _repeatOne)
+                                                    ? C.lime
+                                                    : C.muted,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: OutlinedButton.icon(
+                                            onPressed: () => setState(
+                                              () => _showUpNext = true,
+                                            ),
+                                            icon: Icon(
+                                              Icons.queue_music_rounded,
+                                            ),
+                                            label: Text(
+                                              'Up Next · ${_queue.length - _queueIndex - 1}',
+                                            ),
                                           ),
                                         ),
                                       ],
@@ -4961,131 +5083,334 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ],
                               ),
-                            ],
-                            SizedBox(height: 20),
-                            _seekBar(progress, duration),
-                            SizedBox(height: 8),
-                            Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  _formatTime(position),
-                                  style: TextStyle(
-                                    color: C.muted,
-                                    fontSize: 10,
-                                  ),
+                            ),
+                          );
+                        }
+
+                        return SingleChildScrollView(
+                          padding: EdgeInsets.fromLTRB(22, 16, 22, 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (_showUpNext) ...[
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        'Up next',
+                                        style: TextStyle(
+                                          fontFamily: 'SyneBold',
+                                          fontSize: 22,
+                                        ),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Close Up Next',
+                                      onPressed: () =>
+                                          setState(() => _showUpNext = false),
+                                      icon: Icon(Icons.close_rounded),
+                                    ),
+                                    PopupMenuButton<String>(
+                                      onSelected: (value) {
+                                        if (value == 'clear') _clearUpcoming();
+                                        if (value == 'save') {
+                                          _saveQueueAsPlaylist();
+                                        }
+                                      },
+                                      itemBuilder: (_) => [
+                                        PopupMenuItem(
+                                          value: 'clear',
+                                          child: Text('Clear upcoming tracks'),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'save',
+                                          child: Text('Save queue as playlist'),
+                                        ),
+                                      ],
+                                      icon: Icon(Icons.more_vert_rounded),
+                                    ),
+                                  ],
                                 ),
-                                Text(
-                                  _formatTime(duration),
-                                  style: TextStyle(
-                                    color: C.muted,
-                                    fontSize: 10,
+                                ..._queue
+                                    .asMap()
+                                    .entries
+                                    .where((entry) => entry.key > _queueIndex)
+                                    .take(100)
+                                    .map(
+                                      (entry) => ListTile(
+                                        dense: true,
+                                        contentPadding: EdgeInsets.zero,
+                                        leading: _artwork(
+                                          entry.value.coverArt,
+                                          localArtworkPath:
+                                              entry.value.localArtworkPath,
+                                          size: 42,
+                                          seed: entry.value.album,
+                                        ),
+                                        title: Text(
+                                          entry.value.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        subtitle: Text(
+                                          '${entry.value.artist} · ${entry.value.album}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        onTap: () => _play(entry.value),
+                                        trailing: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            IconButton(
+                                              tooltip: 'Move up',
+                                              onPressed:
+                                                  entry.key > _queueIndex + 1
+                                                  ? () => _moveQueueItem(
+                                                      entry.key,
+                                                      entry.key - 1,
+                                                    )
+                                                  : null,
+                                              icon: Icon(
+                                                Icons.arrow_upward_rounded,
+                                                size: 17,
+                                              ),
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Move down',
+                                              onPressed:
+                                                  entry.key < _queue.length - 1
+                                                  ? () => _moveQueueItem(
+                                                      entry.key,
+                                                      entry.key + 1,
+                                                    )
+                                                  : null,
+                                              icon: Icon(
+                                                Icons.arrow_downward_rounded,
+                                                size: 17,
+                                              ),
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Remove from queue',
+                                              onPressed: () =>
+                                                  _removeFromQueue(entry.key),
+                                              icon: Icon(
+                                                Icons.close_rounded,
+                                                size: 18,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                if (_queueIndex >= _queue.length - 1)
+                                  Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 14),
+                                    child: Text(
+                                      "You're at the end of the queue.",
+                                      style: TextStyle(
+                                        color: C.muted,
+                                        fontSize: 12,
+                                      ),
+                                    ),
                                   ),
+                              ] else ...[
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: _artwork(
+                                        track.coverArt,
+                                        localArtworkPath:
+                                            track.localArtworkPath,
+                                        size: artSize,
+                                        seed: track.album,
+                                      ),
+                                    ),
+                                    SizedBox(height: 18),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            track.title,
+                                            maxLines: 3,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontFamily: 'SyneBold',
+                                              fontSize: 21,
+                                              letterSpacing: -.7,
+                                            ),
+                                          ),
+                                          SizedBox(height: 6),
+                                          InkWell(
+                                            onTap: () => _openArtist(track),
+                                            child: Text(
+                                              track.artist,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              textAlign: TextAlign.center,
+                                              style: TextStyle(
+                                                color: C.muted,
+                                                fontSize: 13,
+                                                decoration:
+                                                    TextDecoration.underline,
+                                                decorationColor: C.border,
+                                              ),
+                                            ),
+                                          ),
+                                          SizedBox(height: 4),
+                                          InkWell(
+                                            onTap: () => _openAlbum(track),
+                                            child: Text(
+                                              track.album,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              textAlign: TextAlign.center,
+                                              style: TextStyle(
+                                                color: C.muted,
+                                                fontSize: 11,
+                                                decoration:
+                                                    TextDecoration.underline,
+                                                decorationColor: C.border,
+                                              ),
+                                            ),
+                                          ),
+                                          if (_showVisualizer) ...[
+                                            SizedBox(height: 8),
+                                            _visualizer(),
+                                          ],
+                                          SizedBox(height: 10),
+                                          IconButton(
+                                            alignment: Alignment.center,
+                                            padding: EdgeInsets.zero,
+                                            onPressed: () =>
+                                                _toggleFavorite(track),
+                                            icon: Icon(
+                                              _favorites.contains(track.id)
+                                                  ? Icons.favorite_rounded
+                                                  : Icons
+                                                        .favorite_border_rounded,
+                                              color:
+                                                  _favorites.contains(track.id)
+                                                  ? C.lime
+                                                  : C.muted,
+                                              size: 24,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
-                            ),
-                            SizedBox(height: 18),
-                            Row(
+                              SizedBox(height: 20),
+                              _playbackProgress(duration),
+                              SizedBox(height: 8),
+                              SizedBox(height: 18),
+                              Row(
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
-                              children: [
-                                IconButton(
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: BoxConstraints(
-                                    minWidth: 40,
-                                    minHeight: 40,
-                                  ),
-                                  onPressed: _toggleShuffle,
-                                  icon: Icon(
-                                    Icons.shuffle_rounded,
-                                    color: _shuffle ? C.lime : C.muted,
-                                    size: 21,
-                                  ),
-                                ),
-                                IconButton(
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: BoxConstraints(
-                                    minWidth: 40,
-                                    minHeight: 40,
-                                  ),
-                                  onPressed: () => _skip(-1),
-                                  icon: Icon(
-                                    Icons.skip_previous_rounded,
-                                    size: 27,
-                                  ),
-                                ),
-                                InkWell(
-                                  borderRadius: BorderRadius.circular(40),
-                                  onTap: _togglePlayback,
-                                  child: Container(
-                                    width: 52,
-                                    height: 52,
-                                    decoration: BoxDecoration(
-                                      color: C.lime,
-                                      shape: BoxShape.circle,
+                                children: [
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    constraints: BoxConstraints(
+                                      minWidth: 40,
+                                      minHeight: 40,
                                     ),
-                                    child: Icon(
-                                      _player.playing
-                                          ? Icons.pause_rounded
-                                          : Icons.play_arrow_rounded,
-                                      color: C.black,
-                                      size: 26,
+                                    onPressed: _toggleShuffle,
+                                    icon: Icon(
+                                      Icons.shuffle_rounded,
+                                      color: _shuffle ? C.lime : C.muted,
+                                      size: 21,
                                     ),
                                   ),
-                                ),
-                                IconButton(
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: BoxConstraints(
-                                    minWidth: 40,
-                                    minHeight: 40,
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    constraints: BoxConstraints(
+                                      minWidth: 40,
+                                      minHeight: 40,
+                                    ),
+                                    onPressed: () => _skip(-1),
+                                    icon: Icon(
+                                      Icons.skip_previous_rounded,
+                                      size: 27,
+                                    ),
                                   ),
-                                  onPressed: () => _skip(1),
+                                  InkWell(
+                                    borderRadius: BorderRadius.circular(40),
+                                    onTap: _togglePlayback,
+                                    child: Container(
+                                      width: 52,
+                                      height: 52,
+                                      decoration: BoxDecoration(
+                                        color: C.lime,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        _player.playing
+                                            ? Icons.pause_rounded
+                                            : Icons.play_arrow_rounded,
+                                        color: C.black,
+                                        size: 26,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    constraints: BoxConstraints(
+                                      minWidth: 40,
+                                      minHeight: 40,
+                                    ),
+                                    onPressed: () => _skip(1),
                                     icon: Icon(
                                       Icons.skip_next_rounded,
                                       size: 27,
                                     ),
-                                ),
-                                IconButton(
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: BoxConstraints(
-                                    minWidth: 40,
-                                    minHeight: 40,
                                   ),
-                                  onPressed: _cycleRepeatMode,
-                                  icon: Icon(
-                                    Icons.repeat_rounded,
-                                    color: (_repeatAll || _repeatOne)
-                                        ? C.lime
-                                        : C.muted,
-                                    size: 21,
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    constraints: BoxConstraints(
+                                      minWidth: 40,
+                                      minHeight: 40,
+                                    ),
+                                    onPressed: _cycleRepeatMode,
+                                    icon: Icon(
+                                      Icons.repeat_rounded,
+                                      color: (_repeatAll || _repeatOne)
+                                          ? C.lime
+                                          : C.muted,
+                                      size: 21,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: 16),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: OutlinedButton.icon(
+                                ],
+                              ),
+                              SizedBox(height: 16),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: OutlinedButton.icon(
                                   onPressed: () => setState(
                                     () => _showUpNext = !_showUpNext,
                                   ),
-                                icon: Icon(
-                                  _showUpNext
-                                      ? Icons.album_rounded
-                                      : Icons.queue_music_rounded,
-                                ),
-                                label: Text(
-                                  _showUpNext
-                                      ? 'Back to artwork'
-                                      : 'Up Next · ${_queue.length - _queueIndex - 1}',
+                                  icon: Icon(
+                                    _showUpNext
+                                        ? Icons.album_rounded
+                                        : Icons.queue_music_rounded,
+                                  ),
+                                  label: Text(
+                                    _showUpNext
+                                        ? 'Back to artwork'
+                                        : 'Up Next · ${_queue.length - _queueIndex - 1}',
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
+                            ],
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -5149,35 +5474,34 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   SizedBox(height: 4),
-                  Wrap(
-                    spacing: 5,
+                  Row(
                     children: [
-                      InkWell(
-                        onTap: () => _openArtist(track),
-                        child: Text(
-                          track.artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: C.muted,
-                            fontSize: 11,
-                            decoration: TextDecoration.underline,
-                            decorationColor: C.border,
+                      Flexible(
+                        child: InkWell(
+                          onTap: () => _openArtist(track),
+                          child: Text(
+                            track.artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: C.muted, fontSize: 11),
                           ),
                         ),
                       ),
-                      Text('·', style: TextStyle(color: C.muted, fontSize: 11)),
-                      InkWell(
-                        onTap: () => _openAlbum(track),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 5),
                         child: Text(
-                          track.album,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: C.muted,
-                            fontSize: 11,
-                            decoration: TextDecoration.underline,
-                            decorationColor: C.border,
+                          '·',
+                          style: TextStyle(color: C.muted, fontSize: 11),
+                        ),
+                      ),
+                      Flexible(
+                        child: InkWell(
+                          onTap: () => _openAlbum(track),
+                          child: Text(
+                            track.album,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: C.muted, fontSize: 11),
                           ),
                         ),
                       ),
@@ -5209,6 +5533,9 @@ class _HomeScreenState extends State<HomeScreen> {
     required String seed,
   }) {
     final url = coverArt == null ? null : _client?.coverArtUrl(coverArt);
+    final pixelSize = (size * MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(1, 2048);
 
     final colors = [
       Color(0xFF3B4430),
@@ -5228,6 +5555,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ? Image.file(
                 File(localArtworkPath),
                 fit: BoxFit.cover,
+                cacheWidth: pixelSize,
+                cacheHeight: pixelSize,
                 errorBuilder: (context, error, stackTrace) => Container(
                   color: color,
                   alignment: Alignment.center,
@@ -5268,6 +5597,8 @@ class _HomeScreenState extends State<HomeScreen> {
             : Image.network(
                 url,
                 fit: BoxFit.cover,
+                cacheWidth: pixelSize,
+                cacheHeight: pixelSize,
                 errorBuilder: (context, error, stackTrace) => Container(
                   color: color,
                   alignment: Alignment.center,
@@ -5424,7 +5755,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _visualizer() {
-    final phase = _player.position.inMilliseconds / 180;
+    return ValueListenableBuilder<Duration>(
+      valueListenable: _position,
+      builder: (context, _, _) => RepaintBoundary(child: _visualizerBody()),
+    );
+  }
+
+  Widget _visualizerBody() {
+    final phase = _position.value.inMilliseconds / 180;
     return Container(
       height: 54,
       width: double.infinity,
@@ -5459,6 +5797,37 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }),
       ),
+    );
+  }
+
+  Widget _playbackProgress(double duration) {
+    return ValueListenableBuilder<Duration>(
+      valueListenable: _position,
+      builder: (context, position, _) {
+        final seconds = position.inSeconds.toDouble();
+        final progress = duration <= 0
+            ? 0.0
+            : (seconds / duration).clamp(0.0, 1.0);
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _seekBar(progress, duration),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  _formatTime(seconds),
+                  style: TextStyle(color: C.muted, fontSize: 10),
+                ),
+                Text(
+                  _formatTime(duration),
+                  style: TextStyle(color: C.muted, fontSize: 10),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 
