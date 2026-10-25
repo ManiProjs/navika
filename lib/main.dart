@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -77,6 +78,8 @@ const _repeatAllKey = 'navika.playback.repeat-all';
 const _repeatOneKey = 'navika.playback.repeat-one';
 const _queueKey = 'navika.playback.queue';
 const _recommendationFeedbackKey = 'navika.recommendations.dismissed';
+const _tasteProfileKey = 'navika.taste-profile.v1';
+const _librarySourceKey = 'navika.library-source.v1';
 const _speedKey = 'navika.playback.speed';
 const _localTracksKey = 'navika.local.tracks';
 const _localFoldersKey = 'navika.local.folders';
@@ -287,6 +290,129 @@ class _NewPlaylistDialog extends StatefulWidget {
 
   @override
   State<_NewPlaylistDialog> createState() => _NewPlaylistDialogState();
+}
+
+class _FlowSlider extends StatefulWidget {
+  const _FlowSlider({
+    required this.value,
+    required this.onChanged,
+    required this.onChangeEnd,
+  });
+
+  final double value;
+  final ValueChanged<double> onChanged;
+  final VoidCallback onChangeEnd;
+
+  @override
+  State<_FlowSlider> createState() => _FlowSliderState();
+}
+
+class _FlowSliderState extends State<_FlowSlider> {
+  late double _value = widget.value;
+
+  @override
+  void didUpdateWidget(covariant _FlowSlider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) _value = widget.value;
+  }
+
+  void _update(double dx, double width) {
+    if (width <= 0) return;
+    setState(() => _value = (dx / width).clamp(0.0, 1.0));
+  }
+
+  void _finish() {
+    widget.onChanged(_value);
+    widget.onChangeEnd();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 32,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (details) => _update(details.localPosition.dx, width),
+            onTapUp: (_) => _finish(),
+            onHorizontalDragUpdate: (details) =>
+                _update(details.localPosition.dx, width),
+            onHorizontalDragEnd: (_) => _finish(),
+            child: Center(
+              child: SizedBox(
+                height: 4,
+                width: double.infinity,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: C.border,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                    ),
+                    AnimatedFractionallySizedBox(
+                      duration: Duration(milliseconds: 90),
+                      curve: Curves.easeOutCubic,
+                      widthFactor: _value,
+                      alignment: Alignment.centerLeft,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: C.lime,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                            ),
+                          ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: Container(
+                              width: 2,
+                              decoration: BoxDecoration(
+                                color: C.lime,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: C.lime.withValues(alpha: .6),
+                                    blurRadius: 3,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    AnimatedPositioned(
+                      left: (width * _value - 7).clamp(-1.0, width - 13),
+                      top: -5,
+                      duration: Duration(milliseconds: 90),
+                      curve: Curves.easeOutCubic,
+                      child: Container(
+                        width: 14,
+                        height: 14,
+                        decoration: BoxDecoration(
+                          color: C.lime,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: C.bg, width: 2),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
 
 class _NewPlaylistDialogState extends State<_NewPlaylistDialog> {
@@ -566,7 +692,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _folderScanTimer;
   int _searchRequestId = 0;
   final Set<String> _dismissedRecommendations = {};
+  final Map<String, int> _tasteArtistFeedback = {};
+  final Map<String, int> _tasteTrackFeedback = {};
   double _playbackSpeed = 1.0;
+  double _flowFamiliarity = .62;
+  double _flowVariety = .68;
+  Color? _artworkAccentColor;
+  int _artworkColorRequest = 0;
 
   AppTab _tab = AppTab.home;
   bool _showLocalLibrary = false;
@@ -593,6 +725,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _showLogin = false;
   bool _showSettings = false;
   bool _showPlayer = false;
+  bool _showFlow = false;
+  int _flowPage = 0;
+  bool _flowActive = false;
   bool _showUpNext = false;
   bool _showVisualizer = false;
   bool _reduceMotion = false;
@@ -602,6 +737,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _repeatOne = false;
   bool _handlingCompletion = false;
   bool _seeking = false;
+  Offset? _pendingSeekPosition;
   bool _scanningLocalFolders = false;
   bool _localFolderScanRequested = false;
   bool _pendingFolderScanFeedback = false;
@@ -632,7 +768,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // Position ticks arrive several times per second. Keep them out of the
         // page-level setState so a progress update doesn't rebuild the entire
         // library, settings, artwork shelves, and navigation on older phones.
-        _position.value = position;
+        if (!_seeking) _position.value = position;
       }),
     );
     _playerSubscriptions.add(
@@ -769,7 +905,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _saveLibrarySourcePreference() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_librarySourceKey, _showLocalLibrary);
+  }
+
   bool get _shouldHandleSystemBack =>
+      _showFlow ||
       _showVisualizer ||
       _showUpNext ||
       _showPlayer ||
@@ -778,7 +920,15 @@ class _HomeScreenState extends State<HomeScreen> {
       _tab != AppTab.home;
 
   void _handleSystemBack() {
-    if (_showVisualizer) {
+    if (_showFlow) {
+      setState(() {
+        if (_flowPage > 0) {
+          _flowPage = 0;
+        } else {
+          _showFlow = false;
+        }
+      });
+    } else if (_showVisualizer) {
       setState(() => _showVisualizer = false);
     } else if (_showUpNext) {
       setState(() => _showUpNext = false);
@@ -914,11 +1064,38 @@ class _HomeScreenState extends State<HomeScreen> {
       orElse: () => NavikaTheme.dark,
     );
     _autoAdvance = preferences.getBool(_autoAdvanceKey) ?? true;
+    _showLocalLibrary = preferences.getBool(_librarySourceKey) ?? false;
     _showVisualizer = preferences.getBool(_visualizerKey) ?? false;
     _shuffle = preferences.getBool(_shuffleKey) ?? false;
     _repeatAll = preferences.getBool(_repeatAllKey) ?? false;
     _repeatOne = preferences.getBool(_repeatOneKey) ?? false;
     _playbackSpeed = preferences.getDouble(_speedKey) ?? 1.0;
+    final savedTaste = preferences.getString(_tasteProfileKey);
+    if (savedTaste != null) {
+      try {
+        final decoded = Map<String, dynamic>.from(
+          jsonDecode(savedTaste) as Map,
+        );
+        _tasteArtistFeedback
+          ..clear()
+          ..addAll(
+            Map<String, dynamic>.from(decoded['artists'] as Map? ?? {}).map(
+              (key, value) =>
+                  MapEntry(key, (value as num).toInt().clamp(-2, 2).toInt()),
+            ),
+          );
+        _tasteTrackFeedback
+          ..clear()
+          ..addAll(
+            Map<String, dynamic>.from(decoded['tracks'] as Map? ?? {}).map(
+              (key, value) =>
+                  MapEntry(key, (value as num).toInt().clamp(-2, 2).toInt()),
+            ),
+          );
+      } catch (_) {
+        await preferences.remove(_tasteProfileKey);
+      }
+    }
     final savedFolders = preferences.getStringList(_localFoldersKey) ?? [];
     // Older Android builds stored filesystem paths, but scoped storage does
     // not grant access to those paths. Only SAF tree URIs are valid on Android.
@@ -1582,10 +1759,12 @@ class _HomeScreenState extends State<HomeScreen> {
         _queue = finalQueue;
         _queueIndex = index;
         _current = track;
-        _showPlayer = true;
+        _artworkAccentColor = null;
+        _showPlayer = !_showFlow;
         _showUpNext = false;
         _error = '';
       });
+      unawaited(_updateArtworkAccentColor(track));
 
       unawaited(_saveQueue());
       final event = ListeningEvent(
@@ -1609,6 +1788,7 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }
       }
+      if (mounted && _flowActive) _refreshFlowQueue();
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = _describePlaybackError(error));
@@ -1963,6 +2143,26 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _previewSeek(Offset globalPosition, double durationSeconds) {
+    _pendingSeekPosition = globalPosition;
+    final box = _progressBarKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || box.size.width <= 0 || durationSeconds <= 0) {
+      return;
+    }
+    final local = box.globalToLocal(globalPosition);
+    final fraction = (local.dx / box.size.width).clamp(0.0, 1.0);
+    _position.value = Duration(
+      milliseconds: (durationSeconds * 1000 * fraction).round(),
+    );
+  }
+
+  void _finishSeeking(double durationSeconds) {
+    final position = _pendingSeekPosition;
+    _pendingSeekPosition = null;
+    setState(() => _seeking = false);
+    if (position != null) _seekTo(position, durationSeconds);
+  }
+
   Future<void> _togglePlayback() async {
     if (_current == null) return;
 
@@ -2256,12 +2456,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     // Playback is independent of the active library mode and
                     // server connection. Local tracks must keep the mini player
                     // visible too.
-                    if (_current != null)
-                      ValueListenableBuilder<Duration>(
-                        valueListenable: _position,
-                        builder: (context, _, _) =>
-                            RepaintBoundary(child: _miniPlayer()),
-                      ),
+                    if (_current != null) RepaintBoundary(child: _miniPlayer()),
                     if (!isDesktop) _tabBar(),
                   ],
                 ),
@@ -2294,9 +2489,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ),
+                if (_showFlow) Positioned.fill(child: _flowOverlay()),
                 // Keep the custom app titlebar above the player overlay so it
                 // remains visible and interactive while the player is open.
-                if (isDesktop && !_showPlayer)
+                if (isDesktop && !_showPlayer && !_showFlow)
                   Positioned(
                     top: 0,
                     left: 0,
@@ -2545,6 +2741,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return AnimatedSwitcher(
       duration: _reduceMotion ? Duration.zero : Duration(milliseconds: 220),
+      transitionBuilder: (child, animation) {
+        final slide = Tween<Offset>(begin: Offset(0, 0.012), end: Offset.zero)
+            .animate(
+              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+            );
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(position: slide, child: child),
+        );
+      },
       child: KeyedSubtree(
         key: ValueKey(_tab),
         child: SingleChildScrollView(
@@ -2561,6 +2767,66 @@ class _HomeScreenState extends State<HomeScreen> {
                 AppTab.stats => _statsPage(),
               },
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _flowLaunchCard() {
+    final available = _modeTracks.isNotEmpty;
+    return Material(
+      color: C.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: () => setState(() {
+          _flowPage = _flowActive ? 1 : 0;
+          _showFlow = true;
+        }),
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: C.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: C.lime.withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(Icons.graphic_eq_rounded, color: C.lime, size: 25),
+              ),
+              SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Navika Flow',
+                      style: TextStyle(fontFamily: 'DMSansBold', fontSize: 15),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      available
+                          ? 'A personal listening session that adapts to you.'
+                          : 'Load your library to start a personal listening session.',
+                      style: TextStyle(
+                        color: C.muted,
+                        fontSize: 11,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(width: 8),
+              Icon(Icons.arrow_forward_rounded, color: C.lime, size: 20),
+            ],
           ),
         ),
       ),
@@ -2667,6 +2933,8 @@ class _HomeScreenState extends State<HomeScreen> {
             letterSpacing: -2,
           ),
         ),
+        SizedBox(height: 18),
+        _flowLaunchCard(),
         SizedBox(height: 28),
         Row(
           children: [
@@ -2956,6 +3224,344 @@ class _HomeScreenState extends State<HomeScreen> {
     return diversified;
   }
 
+  List<MusicTrack> _buildFlowQueue() {
+    final tracks = _modeTracks
+        .where((track) => !_dismissedRecommendations.contains(track.id))
+        .toList();
+    if (tracks.isEmpty) return [];
+
+    final artistPlays = <String, int>{};
+    final albumPlays = <String, int>{};
+    final trackPlays = <String, int>{};
+    for (final event in _history) {
+      artistPlays.update(
+        event.artist.toLowerCase(),
+        (count) => count + 1,
+        ifAbsent: () => 1,
+      );
+      albumPlays.update(
+        event.album.toLowerCase(),
+        (count) => count + 1,
+        ifAbsent: () => 1,
+      );
+      trackPlays.update(event.id, (count) => count + 1, ifAbsent: () => 1);
+    }
+
+    final recentIds = _history
+        .skip(math.max(0, _history.length - 18))
+        .map((event) => event.id)
+        .toSet();
+    final candidates = tracks.where((track) => track.id != _current?.id).map((
+      track,
+    ) {
+      final artist = track.artist.toLowerCase();
+      final album = track.album.toLowerCase();
+      final artistFamiliarity =
+          (math.min(artistPlays[artist] ?? 0, 8) / 8) * .62;
+      final albumFamiliarity = (math.min(albumPlays[album] ?? 0, 5) / 5) * .18;
+      final favoriteBoost = _favorites.contains(track.id) ? .28 : 0.0;
+      final artistFeedback = (_tasteArtistFeedback[artist] ?? 0) * .24;
+      final trackFeedback = (_tasteTrackFeedback[track.id] ?? 0) * .34;
+      final familiarity = (artistFamiliarity + albumFamiliarity + favoriteBoost)
+          .clamp(0.0, 1.0);
+      final discovery =
+          (1 - familiarity) * .78 +
+          ((trackPlays[track.id] ?? 0) == 0 ? .2 : 0.0) -
+          (recentIds.contains(track.id) ? .38 : 0.0);
+      final score =
+          _flowFamiliarity * familiarity +
+          (1 - _flowFamiliarity) * discovery +
+          artistFeedback +
+          trackFeedback;
+      return (track: track, score: score);
+    }).toList();
+
+    final queue = <MusicTrack>[];
+    final remaining = List.of(candidates);
+    while (remaining.isNotEmpty && queue.length < 80) {
+      var bestIndex = 0;
+      var bestScore = double.negativeInfinity;
+      for (var i = 0; i < remaining.length; i++) {
+        final candidate = remaining[i];
+        final recentArtistCount = queue
+            .skip(math.max(0, queue.length - 4))
+            .where(
+              (track) =>
+                  track.artist.toLowerCase() ==
+                  candidate.track.artist.toLowerCase(),
+            )
+            .length;
+        final score = candidate.score - recentArtistCount * _flowVariety * .42;
+        if (score > bestScore) {
+          bestScore = score;
+          bestIndex = i;
+        }
+      }
+      queue.add(remaining.removeAt(bestIndex).track);
+    }
+
+    // Keep the session useful even when the current song is the only library
+    // item, rather than returning a queue that can never advance.
+    return queue.isEmpty ? [tracks.first] : queue;
+  }
+
+  void _refreshFlowQueue() {
+    final current = _current;
+    final upcoming = _buildFlowQueue()
+        .where((track) => track.id != current?.id)
+        .toList();
+    if (!mounted) return;
+    setState(() {
+      _queue = [?current, ...upcoming];
+      _queueIndex = 0;
+    });
+    unawaited(_saveQueue());
+  }
+
+  Future<void> _startFlow() async {
+    final picks = _buildFlowQueue();
+    if (picks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Load a music library to start Navika Flow.')),
+      );
+      return;
+    }
+    setState(() {
+      _showFlow = true;
+      _flowActive = true;
+      _showPlayer = false;
+    });
+    await _play(picks.first, playlist: picks);
+  }
+
+  String _flowReason(MusicTrack track) {
+    if ((_tasteTrackFeedback[track.id] ?? 0) > 0) {
+      return 'You asked for more like this';
+    }
+    if ((_tasteArtistFeedback[track.artist.toLowerCase()] ?? 0) > 0) {
+      return 'An artist you told Navika you like';
+    }
+    if ((_tasteTrackFeedback[track.id] ?? 0) < 0) {
+      return 'Less like this was requested before';
+    }
+    if ((_tasteArtistFeedback[track.artist.toLowerCase()] ?? 0) < 0) {
+      return 'Balancing out an artist you hear less of';
+    }
+    if (_favorites.contains(track.id)) return 'One of your favorites';
+    final artistPlays = _history
+        .where(
+          (event) => event.artist.toLowerCase() == track.artist.toLowerCase(),
+        )
+        .length;
+    final trackWasRecent = _history
+        .skip(math.max(0, _history.length - 18))
+        .any((event) => event.id == track.id);
+    if (trackWasRecent) return 'A familiar track in your rotation';
+    if (artistPlays >= 3) return 'More from an artist you return to';
+    if (artistPlays == 0) return 'A fresh artist from your library';
+    return 'Keeps your listening varied';
+  }
+
+  Future<void> _saveTasteProfile() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(
+      _tasteProfileKey,
+      jsonEncode({
+        'artists': _tasteArtistFeedback,
+        'tracks': _tasteTrackFeedback,
+      }),
+    );
+  }
+
+  Future<void> _rateCurrentTrack({required bool like}) async {
+    final track = _current;
+    if (track == null) return;
+    final artistKey = track.artist.toLowerCase();
+    setState(() {
+      final value = like ? 1 : -1;
+      _tasteTrackFeedback[track.id] = value;
+      _tasteArtistFeedback[artistKey] =
+          ((_tasteArtistFeedback[artistKey] ?? 0) + value).clamp(-2, 2).toInt();
+    });
+    await _saveTasteProfile();
+    if (_flowActive) _refreshFlowQueue();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          like
+              ? 'Got it — Navika will look for more like this.'
+              : 'Got it — Navika will recommend less like this.',
+        ),
+      ),
+    );
+  }
+
+  List<({String artist, int plays, int feedback})> _tasteTopArtists() {
+    final names = <String, String>{};
+    final plays = <String, int>{};
+    for (final track in _modeTracks) {
+      names.putIfAbsent(track.artist.toLowerCase(), () => track.artist);
+    }
+    for (final event in _history) {
+      final key = event.artist.toLowerCase();
+      names.putIfAbsent(key, () => event.artist);
+      plays.update(key, (count) => count + 1, ifAbsent: () => 1);
+    }
+    for (final key in _tasteArtistFeedback.keys) {
+      names.putIfAbsent(
+        key,
+        () =>
+            _modeTracks
+                .where((track) => track.artist.toLowerCase() == key)
+                .map((track) => track.artist)
+                .firstOrNull ??
+            key,
+      );
+    }
+    final artists = names.entries
+        .map(
+          (entry) => (
+            artist: entry.value,
+            plays: plays[entry.key] ?? 0,
+            feedback: _tasteArtistFeedback[entry.key] ?? 0,
+          ),
+        )
+        .toList();
+    artists.sort((a, b) {
+      final aScore = a.feedback * 4 + a.plays;
+      final bScore = b.feedback * 4 + b.plays;
+      return bScore.compareTo(aScore);
+    });
+    return artists.take(5).toList();
+  }
+
+  Future<void> _resetTasteProfile() async {
+    setState(() {
+      _tasteArtistFeedback.clear();
+      _tasteTrackFeedback.clear();
+    });
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_tasteProfileKey);
+    if (_flowActive) _refreshFlowQueue();
+  }
+
+  Future<void> _updateArtworkAccentColor(MusicTrack track) async {
+    final request = ++_artworkColorRequest;
+    try {
+      List<int>? bytes;
+      final localArtworkPath = track.localArtworkPath;
+      if (localArtworkPath != null && localArtworkPath.isNotEmpty) {
+        bytes = await File(localArtworkPath).readAsBytes();
+      } else {
+        final url = (track.coverUrl?.trim().isNotEmpty ?? false)
+            ? track.coverUrl
+            : _client?.coverArtUrl(track.coverArt);
+        if (url != null && url.isNotEmpty) {
+          final client = HttpClient();
+          try {
+            final response = await (await client.getUrl(Uri.parse(url)))
+                .close()
+                .timeout(const Duration(seconds: 8));
+            if (response.statusCode >= 200 && response.statusCode < 300) {
+              bytes = await response
+                  .fold<List<int>>(<int>[], (all, chunk) => all..addAll(chunk))
+                  .timeout(const Duration(seconds: 8));
+            }
+          } finally {
+            client.close(force: true);
+          }
+        }
+      }
+      if (bytes == null || bytes.isEmpty) {
+        if (mounted && request == _artworkColorRequest) {
+          setState(() => _artworkAccentColor = null);
+        }
+        return;
+      }
+
+      final codec = await ui.instantiateImageCodec(
+        Uint8List.fromList(bytes),
+        targetWidth: 32,
+        targetHeight: 32,
+      );
+      try {
+        final frame = await codec.getNextFrame();
+        try {
+          final data = await frame.image.toByteData(
+            format: ui.ImageByteFormat.rawRgba,
+          );
+          if (data == null) return;
+          final pixels = data.buffer.asUint8List();
+          final hueWeights = List<double>.filled(12, 0);
+          final hueRed = List<int>.filled(12, 0);
+          final hueGreen = List<int>.filled(12, 0);
+          final hueBlue = List<int>.filled(12, 0);
+          final hueCounts = List<int>.filled(12, 0);
+          var redTotal = 0;
+          var greenTotal = 0;
+          var blueTotal = 0;
+          var count = 0;
+          for (var i = 0; i + 3 < pixels.length; i += 4) {
+            final alpha = pixels[i + 3];
+            if (alpha < 96) continue;
+            final red = pixels[i];
+            final green = pixels[i + 1];
+            final blue = pixels[i + 2];
+            final color = Color.fromARGB(255, red, green, blue);
+            final hsl = HSLColor.fromColor(color);
+            redTotal += red;
+            greenTotal += green;
+            blueTotal += blue;
+            count++;
+            if (hsl.saturation < .22 ||
+                hsl.lightness < .12 ||
+                hsl.lightness > .88) {
+              continue;
+            }
+            final bucket = (hsl.hue / 30).floor().clamp(0, 11);
+            hueWeights[bucket] +=
+                hsl.saturation * (1 - (hsl.lightness - .5).abs());
+            hueRed[bucket] += red;
+            hueGreen[bucket] += green;
+            hueBlue[bucket] += blue;
+            hueCounts[bucket]++;
+          }
+          if (count == 0) return;
+          final strongest = hueWeights.indexOf(hueWeights.reduce(math.max));
+          final accent = hueCounts[strongest] == 0
+              ? Color.fromARGB(
+                  255,
+                  redTotal ~/ count,
+                  greenTotal ~/ count,
+                  blueTotal ~/ count,
+                )
+              : Color.fromARGB(
+                  255,
+                  hueRed[strongest] ~/ hueCounts[strongest],
+                  hueGreen[strongest] ~/ hueCounts[strongest],
+                  hueBlue[strongest] ~/ hueCounts[strongest],
+                );
+          if (mounted &&
+              request == _artworkColorRequest &&
+              _current?.id == track.id) {
+            setState(() => _artworkAccentColor = accent);
+          }
+        } finally {
+          frame.image.dispose();
+        }
+      } finally {
+        codec.dispose();
+      }
+    } catch (_) {
+      if (mounted &&
+          request == _artworkColorRequest &&
+          _current?.id == track.id) {
+        setState(() => _artworkAccentColor = null);
+      }
+    }
+  }
+
   List<MusicTrack> _discoveryTracks() {
     final playedRecently = _history
         .skip(math.max(0, _history.length - 12))
@@ -3235,6 +3841,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 _searching = false;
                 _searchError = '';
               });
+              unawaited(_saveLibrarySourcePreference());
               if (!_showLocalLibrary && _connected && !_libraryLoaded) {
                 unawaited(_loadLibrary());
               }
@@ -3830,11 +4437,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _miniPlayer() {
     final track = _current!;
-    final duration = _player.duration?.inMilliseconds ?? 0;
-    final position = _position.value.inMilliseconds;
-    final progress = duration == 0
-        ? 0.0
-        : (position / duration).clamp(0.0, 1.0);
 
     return SizedBox(
       width: double.infinity,
@@ -3920,11 +4522,27 @@ class _HomeScreenState extends State<HomeScreen> {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                child: LinearProgressIndicator(
-                  value: progress,
-                  minHeight: 2,
-                  backgroundColor: Colors.transparent,
-                  valueColor: AlwaysStoppedAnimation<Color>(C.lime),
+                child: SizedBox(
+                  height: 2,
+                  child: ValueListenableBuilder<Duration>(
+                    valueListenable: _position,
+                    builder: (context, position, _) {
+                      final duration = _player.duration?.inMilliseconds ?? 0;
+                      final progress = duration <= 0
+                          ? 0.0
+                          : (position.inMilliseconds / duration).clamp(
+                              0.0,
+                              1.0,
+                            );
+                      return Align(
+                        alignment: Alignment.centerLeft,
+                        child: FractionallySizedBox(
+                          widthFactor: progress,
+                          child: ColoredBox(color: C.lime),
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
             ],
@@ -3968,10 +4586,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(
-                              tab.icon,
-                              size: 22,
-                              color: active ? C.lime : C.muted,
+                            AnimatedScale(
+                              scale: active ? 1 : 0.96,
+                              duration: _reduceMotion
+                                  ? Duration.zero
+                                  : Duration(milliseconds: 160),
+                              curve: Curves.easeOut,
+                              child: Icon(
+                                tab.icon,
+                                size: 22,
+                                color: active ? C.lime : C.muted,
+                              ),
                             ),
                             SizedBox(height: 3),
                             Text(
@@ -3986,18 +4611,21 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ],
                         ),
-                        if (active)
-                          Positioned(
-                            bottom: 0,
-                            child: Container(
-                              width: 18,
-                              height: 2,
-                              decoration: BoxDecoration(
-                                color: C.lime,
-                                borderRadius: BorderRadius.circular(1),
-                              ),
+                        Positioned(
+                          bottom: 0,
+                          child: AnimatedContainer(
+                            width: active ? 18 : 0,
+                            height: 2,
+                            duration: _reduceMotion
+                                ? Duration.zero
+                                : Duration(milliseconds: 180),
+                            curve: Curves.easeOutCubic,
+                            decoration: BoxDecoration(
+                              color: C.lime,
+                              borderRadius: BorderRadius.circular(1),
                             ),
                           ),
+                        ),
                       ],
                     ),
                   ),
@@ -4430,6 +5058,98 @@ class _HomeScreenState extends State<HomeScreen> {
                                   _selectTab(AppTab.library);
                                 },
                               ),
+                              _settingsSection('PERSONAL TASTE'),
+                              Padding(
+                                padding: EdgeInsets.only(bottom: 8),
+                                child: Text(
+                                  'Navika learns from your listening history, favorites, and feedback. Explicit feedback is saved only on this device and influences Flow.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                    height: 1.55,
+                                  ),
+                                ),
+                              ),
+                              ..._tasteTopArtists().map(
+                                (artist) => ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                  title: Text(
+                                    artist.artist,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                  subtitle: Text(
+                                    '${artist.plays} plays${artist.feedback == 0
+                                        ? ''
+                                        : artist.feedback > 0
+                                        ? ' · you like this artist'
+                                        : ' · lower priority'}',
+                                    style: TextStyle(
+                                      color: C.muted,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                  trailing: artist.feedback == 0
+                                      ? Icon(
+                                          Icons.graphic_eq_rounded,
+                                          color: C.muted,
+                                          size: 17,
+                                        )
+                                      : Icon(
+                                          artist.feedback > 0
+                                              ? Icons.thumb_up_alt_rounded
+                                              : Icons.thumb_down_alt_rounded,
+                                          color: artist.feedback > 0
+                                              ? C.lime
+                                              : C.danger,
+                                          size: 17,
+                                        ),
+                                ),
+                              ),
+                              if (_tasteTopArtists().isEmpty)
+                                Padding(
+                                  padding: EdgeInsets.only(bottom: 10),
+                                  child: Text(
+                                    'Your profile will take shape as you listen and give feedback.',
+                                    style: TextStyle(
+                                      color: C.muted,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  'Reset personal taste profile',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                subtitle: Text(
+                                  'Clear your More/Less like this feedback. Listening history and favorites stay intact.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                trailing: Icon(
+                                  Icons.restart_alt_rounded,
+                                  color: C.danger,
+                                  size: 19,
+                                ),
+                                onTap: () async {
+                                  await _resetTasteProfile();
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Personal taste feedback reset.',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
                               _settingsSection('YOUR DATA'),
                               ListTile(
                                 contentPadding: EdgeInsets.zero,
@@ -4518,6 +5238,681 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _flowOverlay() {
+    final accent = C.lime;
+    final preview = _flowActive
+        ? _queue.skip(_queueIndex + 1).take(5).toList()
+        : _buildFlowQueue().take(5).toList();
+    final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
+    if (_flowPage == 0) {
+      return _flowWelcome(isMacOS: isMacOS, accent: accent);
+    }
+    return _flowPageEntrance(
+      page: 1,
+      child: Material(
+        color: C.bg,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(isMacOS ? 82 : 14, 4, 18, 12),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Back to welcome',
+                      onPressed: () => setState(() => _flowPage = 0),
+                      icon: Icon(Icons.arrow_back_rounded),
+                    ),
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: C.lime,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          _brandLine(12),
+                          SizedBox(width: 2),
+                          _brandLine(15),
+                          SizedBox(width: 2),
+                          _brandLine(9),
+                        ],
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'navika flow',
+                            style: TextStyle(
+                              fontFamily: 'SyneBold',
+                              fontSize: 23,
+                              letterSpacing: -1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_flowActive)
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: .12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          'LIVE',
+                          style: TextStyle(
+                            color: accent,
+                            fontFamily: 'DMSansBold',
+                            fontSize: 9,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(20, 8, 20, 28),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: 720),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _flowStepProgress(activeStep: 1),
+                          SizedBox(height: 24),
+                          Text(
+                            'Choose your taste',
+                            style: TextStyle(
+                              fontFamily: 'SyneBold',
+                              fontSize: 30,
+                              letterSpacing: -1.1,
+                            ),
+                          ),
+                          SizedBox(height: 7),
+                          Text(
+                            'Tune the mix, then preview your first picks below.',
+                            style: TextStyle(
+                              color: C.muted,
+                              fontSize: 12,
+                              height: 1.6,
+                            ),
+                          ),
+                          SizedBox(height: 20),
+                          _card(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        'Familiarity',
+                                        style: TextStyle(
+                                          fontFamily: 'DMSansBold',
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      _flowFamiliarity > .68
+                                          ? 'Comfort zone'
+                                          : (_flowFamiliarity < .32
+                                                ? 'Discover'
+                                                : 'A bit of both'),
+                                      style: TextStyle(
+                                        color: accent,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Lean into artists you know, or explore less-played music.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                    height: 1.5,
+                                  ),
+                                ),
+                                _flowSlider(
+                                  value: _flowFamiliarity,
+                                  onChanged: (value) =>
+                                      setState(() => _flowFamiliarity = value),
+                                  onChangeEnd: () {
+                                    if (_flowActive) _refreshFlowQueue();
+                                  },
+                                ),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'DISCOVER',
+                                      style: TextStyle(
+                                        color: C.muted,
+                                        fontSize: 9,
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                    Text(
+                                      'FAMILIAR',
+                                      style: TextStyle(
+                                        color: C.muted,
+                                        fontSize: 9,
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                SizedBox(height: 22),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        'Artist variety',
+                                        style: TextStyle(
+                                          fontFamily: 'DMSansBold',
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      _flowVariety > .68
+                                          ? 'Eclectic'
+                                          : (_flowVariety < .32
+                                                ? 'Longer runs'
+                                                : 'Balanced'),
+                                      style: TextStyle(
+                                        color: accent,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Choose how often Flow switches to a different artist.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                    height: 1.5,
+                                  ),
+                                ),
+                                _flowSlider(
+                                  value: _flowVariety,
+                                  onChanged: (value) =>
+                                      setState(() => _flowVariety = value),
+                                  onChangeEnd: () {
+                                    if (_flowActive) _refreshFlowQueue();
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (_flowActive && _current != null) ...[
+                            SizedBox(height: 20),
+                            Text(
+                              'NOW PLAYING',
+                              style: TextStyle(
+                                color: accent,
+                                fontFamily: 'DMSansBold',
+                                fontSize: 9,
+                                letterSpacing: 1.3,
+                              ),
+                            ),
+                            SizedBox(height: 10),
+                            Row(
+                              children: [
+                                _artwork(
+                                  _current!.coverArt,
+                                  localArtworkPath: _current!.localArtworkPath,
+                                  size: 66,
+                                  seed: _current!.album,
+                                ),
+                                SizedBox(width: 13),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _current!.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontFamily: 'DMSansBold',
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      SizedBox(height: 4),
+                                      Text(
+                                        _current!.artist,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: C.muted,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                      SizedBox(height: 5),
+                                      Text(
+                                        _flowReason(_current!),
+                                        style: TextStyle(
+                                          color: accent,
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: _player.playing ? 'Pause' : 'Play',
+                                  onPressed: _togglePlayback,
+                                  icon: Icon(
+                                    _player.playing
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded,
+                                    color: accent,
+                                    size: 29,
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Next track',
+                                  onPressed: () => _skip(1),
+                                  icon: Icon(
+                                    Icons.skip_next_rounded,
+                                    color: accent,
+                                    size: 27,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _rateCurrentTrack(like: true),
+                                    icon: Icon(
+                                      Icons.thumb_up_alt_outlined,
+                                      size: 16,
+                                    ),
+                                    label: Text('More like this'),
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _rateCurrentTrack(like: false),
+                                    icon: Icon(
+                                      Icons.thumb_down_alt_outlined,
+                                      size: 16,
+                                    ),
+                                    label: Text('Less like this'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          SizedBox(height: 22),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _flowActive
+                                      ? 'Coming up'
+                                      : 'Your first picks',
+                                  style: TextStyle(
+                                    fontFamily: 'SyneBold',
+                                    fontSize: 20,
+                                    letterSpacing: -.4,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                '${preview.length} tracks',
+                                style: TextStyle(color: C.muted, fontSize: 10),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 10),
+                          if (preview.isEmpty)
+                            _card(
+                              child: Text(
+                                'Open Library and load your music to give Flow something to work with.',
+                                style: TextStyle(
+                                  color: C.muted,
+                                  fontSize: 12,
+                                  height: 1.6,
+                                ),
+                              ),
+                            )
+                          else
+                            ...preview.asMap().entries.map((entry) {
+                              final track = entry.value;
+                              return Padding(
+                                padding: EdgeInsets.only(bottom: 8),
+                                child: Row(
+                                  children: [
+                                    SizedBox(
+                                      width: 20,
+                                      child: Text(
+                                        '${entry.key + 1}',
+                                        style: TextStyle(
+                                          color: C.muted,
+                                          fontSize: 10,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                    SizedBox(width: 10),
+                                    _artwork(
+                                      track.coverArt,
+                                      localArtworkPath: track.localArtworkPath,
+                                      size: 42,
+                                      seed: track.album,
+                                    ),
+                                    SizedBox(width: 11),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            track.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontFamily: 'DMSansMedium',
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          SizedBox(height: 3),
+                                          Text(
+                                            '${track.artist} · ${_flowReason(track)}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: C.muted,
+                                              fontSize: 10,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
+                          SizedBox(height: 20),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 52,
+                            child: FilledButton.icon(
+                              onPressed: _modeTracks.isEmpty
+                                  ? null
+                                  : (_flowActive
+                                        ? _refreshFlowQueue
+                                        : _startFlow),
+                              icon: Icon(
+                                _flowActive
+                                    ? Icons.refresh_rounded
+                                    : Icons.play_arrow_rounded,
+                              ),
+                              label: Text(
+                                _flowActive
+                                    ? 'Refresh upcoming tracks'
+                                    : 'Start Navika Flow',
+                              ),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: accent,
+                                foregroundColor: C.bg,
+                              ),
+                            ),
+                          ),
+                          if (_flowActive) ...[
+                            SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: TextButton(
+                                onPressed: () => setState(() {
+                                  _flowActive = false;
+                                  _showFlow = false;
+                                }),
+                                child: Text(
+                                  'End Flow session',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _flowPageEntrance({required int page, required Widget child}) {
+    return TweenAnimationBuilder<double>(
+      key: ValueKey('flow-page-$page'),
+      tween: Tween(begin: 0, end: 1),
+      duration: _reduceMotion ? Duration.zero : Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+      child: child,
+      builder: (context, progress, child) => Opacity(
+        opacity: progress,
+        child: Transform.translate(
+          offset: Offset(0, (1 - progress) * 8),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Widget _flowStepProgress({required int activeStep}) {
+    return Row(
+      children: List.generate(
+        2,
+        (index) => Expanded(
+          child: Container(
+            height: 3,
+            margin: EdgeInsets.only(right: index == 0 ? 7 : 0),
+            decoration: BoxDecoration(
+              color: index <= activeStep ? C.lime : C.border,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _flowSlider({
+    required double value,
+    required ValueChanged<double> onChanged,
+    required VoidCallback onChangeEnd,
+  }) {
+    return _FlowSlider(
+      value: value,
+      onChanged: onChanged,
+      onChangeEnd: onChangeEnd,
+    );
+  }
+
+  Widget _flowWelcome({required bool isMacOS, required Color accent}) {
+    return _flowPageEntrance(
+      page: 0,
+      child: Material(
+        color: C.bg,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(isMacOS ? 82 : 14, 4, 18, 12),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Close Navika Flow',
+                      onPressed: () => setState(() => _showFlow = false),
+                      icon: Icon(Icons.close_rounded),
+                    ),
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: C.lime,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _brandLine(12),
+                          SizedBox(width: 2),
+                          _brandLine(15),
+                          SizedBox(width: 2),
+                          _brandLine(9),
+                        ],
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    Text(
+                      'navika flow',
+                      style: TextStyle(
+                        fontFamily: 'SyneBold',
+                        fontSize: 23,
+                        letterSpacing: -1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(24, 24, 24, 32),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: 720),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _flowStepProgress(activeStep: 0),
+                          SizedBox(height: 34),
+                          Container(
+                            width: 58,
+                            height: 58,
+                            decoration: BoxDecoration(
+                              color: C.lime,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _brandLine(22),
+                                SizedBox(width: 4),
+                                _brandLine(31),
+                                SizedBox(width: 4),
+                                _brandLine(16),
+                              ],
+                            ),
+                          ),
+                          SizedBox(height: 28),
+                          Text(
+                            'Your music,\nyour momentum.',
+                            style: TextStyle(
+                              fontFamily: 'SyneBold',
+                              fontSize: 42,
+                              height: 1.05,
+                              letterSpacing: -1.8,
+                            ),
+                          ),
+                          SizedBox(height: 14),
+                          Text(
+                            'Navika Flow builds a listening queue from your library, history, and favorites. Shape the balance between familiar tracks and new discoveries, then let the music run.',
+                            style: TextStyle(
+                              color: C.muted,
+                              fontSize: 13,
+                              height: 1.75,
+                            ),
+                          ),
+                          SizedBox(height: 18),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.devices_rounded,
+                                color: accent,
+                                size: 17,
+                              ),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Your listening data stays on this device.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 30),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 52,
+                            child: FilledButton.icon(
+                              onPressed: () => setState(() => _flowPage = 1),
+                              icon: Icon(Icons.arrow_forward_rounded),
+                              label: Text('Choose your taste'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: C.lime,
+                                foregroundColor: C.bg,
+                              ),
+                            ),
+                          ),
+                          if (_modeTracks.isEmpty) ...[
+                            SizedBox(height: 12),
+                            Text(
+                              'Load music in your Library to get your first picks.',
+                              style: TextStyle(color: C.muted, fontSize: 11),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _playerOverlay() {
     final track = _current!;
     final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
@@ -4566,7 +5961,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Text(
                             'NOW PLAYING',
                             style: TextStyle(
-                              color: C.lime,
+                              color: _artworkAccentColor ?? C.lime,
                               fontFamily: 'DMSansBold',
                               fontSize: 9,
                               letterSpacing: 1.3,
@@ -5433,9 +6828,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<Color> _playerAmbientColors() {
-    // Match the background glow to Navika's actual lime accent, rather than
-    // choosing an unrelated pseudo-random palette from the album name.
-    return [Color.lerp(C.lime, C.bg, C.light ? .82 : .88)!, C.bg];
+    // Sample the current cover for a restrained ambient tint. Missing or
+    // unreadable artwork falls back to Navika's signature lime.
+    final accent = _artworkAccentColor ?? C.lime;
+    return [Color.lerp(accent, C.bg, C.light ? .78 : .82)!, C.bg];
   }
 
   Widget _trackRow(MusicTrack track, int index) {
@@ -5844,11 +7240,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _seekBar(double progress, double duration) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onHorizontalDragStart: (_) => setState(() => _seeking = true),
+      onHorizontalDragStart: (_) {
+        _pendingSeekPosition = null;
+        setState(() => _seeking = true);
+      },
       onHorizontalDragUpdate: (details) =>
-          _seekTo(details.globalPosition, duration),
-      onHorizontalDragEnd: (_) => setState(() => _seeking = false),
-      onHorizontalDragCancel: () => setState(() => _seeking = false),
+          _previewSeek(details.globalPosition, duration),
+      onHorizontalDragEnd: (_) => _finishSeeking(duration),
+      onHorizontalDragCancel: () => _finishSeeking(duration),
       onTapDown: (details) => _seekTo(details.globalPosition, duration),
       child: SizedBox(
         key: _progressBarKey,
@@ -5867,15 +7266,50 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(3),
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 4,
-                    backgroundColor: C.border,
-                    valueColor: AlwaysStoppedAnimation(C.lime),
+                  child: SizedBox(
+                    height: 4,
+                    width: width,
+                    child: Stack(
+                      children: [
+                        Positioned.fill(child: ColoredBox(color: C.border)),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: AnimatedFractionallySizedBox(
+                            // Position ticks arrive frequently. Keep the fill
+                            // close to the playhead instead of making it chase
+                            // an animation that is still in flight.
+                            duration: _reduceMotion
+                                ? Duration.zero
+                                : Duration(milliseconds: _seeking ? 45 : 70),
+                            curve: Curves.easeOutCubic,
+                            widthFactor: progress,
+                            child: Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: ColoredBox(color: C.lime),
+                                ),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Container(
+                                    width: 2,
+                                    color: C.lime,
+                                    child: const SizedBox.expand(),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                Positioned(
+                AnimatedPositioned(
                   left: thumbLeft,
+                  duration: _reduceMotion
+                      ? Duration.zero
+                      : Duration(milliseconds: _seeking ? 45 : 70),
+                  curve: Curves.easeOutCubic,
                   child: Container(
                     width: thumbSize,
                     height: thumbSize,
