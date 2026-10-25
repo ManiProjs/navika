@@ -79,6 +79,7 @@ const _repeatOneKey = 'navika.playback.repeat-one';
 const _queueKey = 'navika.playback.queue';
 const _recommendationFeedbackKey = 'navika.recommendations.dismissed';
 const _tasteProfileKey = 'navika.taste-profile.v1';
+const _flowHiddenTracksKey = 'navika.flow.hidden-tracks.v1';
 const _librarySourceKey = 'navika.library-source.v1';
 const _speedKey = 'navika.playback.speed';
 const _localTracksKey = 'navika.local.tracks';
@@ -694,6 +695,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final Set<String> _dismissedRecommendations = {};
   final Map<String, int> _tasteArtistFeedback = {};
   final Map<String, int> _tasteTrackFeedback = {};
+  final Set<String> _flowHiddenTrackIds = {};
   double _playbackSpeed = 1.0;
   double _flowFamiliarity = .62;
   double _flowVariety = .68;
@@ -922,7 +924,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void _handleSystemBack() {
     if (_showFlow) {
       setState(() {
-        if (_flowPage > 0) {
+        if (_flowActive) {
+          _showFlow = false;
+        } else if (_flowPage > 0) {
           _flowPage = 0;
         } else {
           _showFlow = false;
@@ -1076,14 +1080,9 @@ class _HomeScreenState extends State<HomeScreen> {
         final decoded = Map<String, dynamic>.from(
           jsonDecode(savedTaste) as Map,
         );
-        _tasteArtistFeedback
-          ..clear()
-          ..addAll(
-            Map<String, dynamic>.from(decoded['artists'] as Map? ?? {}).map(
-              (key, value) =>
-                  MapEntry(key, (value as num).toInt().clamp(-2, 2).toInt()),
-            ),
-          );
+        // Older builds incorrectly turned song feedback into artist feedback.
+        // Ignore that legacy map so disliking one song never penalizes its artist.
+        _tasteArtistFeedback.clear();
         _tasteTrackFeedback
           ..clear()
           ..addAll(
@@ -1139,6 +1138,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     _dismissedRecommendations.addAll(
       preferences.getStringList(_recommendationFeedbackKey) ?? const [],
+    );
+    _flowHiddenTrackIds.addAll(
+      preferences.getStringList(_flowHiddenTracksKey) ?? const [],
     );
     final savedQueue = preferences.getString(_queueKey);
     if (savedQueue != null) {
@@ -3226,7 +3228,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<MusicTrack> _buildFlowQueue() {
     final tracks = _modeTracks
-        .where((track) => !_dismissedRecommendations.contains(track.id))
+        .where(
+          (track) =>
+              !_dismissedRecommendations.contains(track.id) &&
+              !_flowHiddenTrackIds.contains(track.id),
+        )
         .toList();
     if (tracks.isEmpty) return [];
 
@@ -3260,8 +3266,7 @@ class _HomeScreenState extends State<HomeScreen> {
           (math.min(artistPlays[artist] ?? 0, 8) / 8) * .62;
       final albumFamiliarity = (math.min(albumPlays[album] ?? 0, 5) / 5) * .18;
       final favoriteBoost = _favorites.contains(track.id) ? .28 : 0.0;
-      final artistFeedback = (_tasteArtistFeedback[artist] ?? 0) * .24;
-      final trackFeedback = (_tasteTrackFeedback[track.id] ?? 0) * .34;
+      final trackFeedback = (_tasteTrackFeedback[track.id] ?? 0) * .5;
       final familiarity = (artistFamiliarity + albumFamiliarity + favoriteBoost)
           .clamp(0.0, 1.0);
       final discovery =
@@ -3271,7 +3276,6 @@ class _HomeScreenState extends State<HomeScreen> {
       final score =
           _flowFamiliarity * familiarity +
           (1 - _flowFamiliarity) * discovery +
-          artistFeedback +
           trackFeedback;
       return (track: track, score: score);
     }).toList();
@@ -3338,14 +3342,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if ((_tasteTrackFeedback[track.id] ?? 0) > 0) {
       return 'You asked for more like this';
     }
-    if ((_tasteArtistFeedback[track.artist.toLowerCase()] ?? 0) > 0) {
-      return 'An artist you told Navika you like';
-    }
     if ((_tasteTrackFeedback[track.id] ?? 0) < 0) {
-      return 'Less like this was requested before';
+      return 'You asked for less of this song';
     }
-    if ((_tasteArtistFeedback[track.artist.toLowerCase()] ?? 0) < 0) {
-      return 'Balancing out an artist you hear less of';
+    if ((_tasteTrackFeedback[track.id] ?? 0) > 0) {
+      return 'You asked for more like this song';
     }
     if (_favorites.contains(track.id)) return 'One of your favorites';
     final artistPlays = _history
@@ -3362,6 +3363,89 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'Keeps your listening varied';
   }
 
+  Widget _flowPlayerDetails(MusicTrack track) {
+    if (!_flowActive) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.auto_awesome_rounded, color: C.lime, size: 14),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _flowReason(track),
+                  style: TextStyle(color: C.lime, fontSize: 11),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => _rateCurrentTrack(like: true),
+                icon: const Icon(Icons.thumb_up_alt_outlined, size: 14),
+                label: const Text('More like this'),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 7,
+                  ),
+                  textStyle: const TextStyle(fontSize: 10),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _rateCurrentTrack(like: false),
+                icon: const Icon(Icons.thumb_down_alt_outlined, size: 14),
+                label: const Text('Less like this'),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 7,
+                  ),
+                  textStyle: const TextStyle(fontSize: 10),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _hideCurrentFromFlow,
+                icon: const Icon(Icons.block_rounded, size: 14),
+                label: const Text('Don’t play this song'),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 7,
+                  ),
+                  textStyle: const TextStyle(fontSize: 10),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _refreshFlowQueue,
+                icon: const Icon(Icons.refresh_rounded, size: 14),
+                label: const Text('Refresh mix'),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 7,
+                  ),
+                  textStyle: const TextStyle(fontSize: 10),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _saveTasteProfile() async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(
@@ -3376,12 +3460,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _rateCurrentTrack({required bool like}) async {
     final track = _current;
     if (track == null) return;
-    final artistKey = track.artist.toLowerCase();
     setState(() {
       final value = like ? 1 : -1;
       _tasteTrackFeedback[track.id] = value;
-      _tasteArtistFeedback[artistKey] =
-          ((_tasteArtistFeedback[artistKey] ?? 0) + value).clamp(-2, 2).toInt();
     });
     await _saveTasteProfile();
     if (_flowActive) _refreshFlowQueue();
@@ -3395,6 +3476,36 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _hideCurrentFromFlow() async {
+    final track = _current;
+    if (track == null || !_flowActive) return;
+    setState(() => _flowHiddenTrackIds.add(track.id));
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setStringList(
+      _flowHiddenTracksKey,
+      _flowHiddenTrackIds.toList(),
+    );
+    if (!mounted) return;
+    final nextIndex = _queueIndex + 1;
+    if (nextIndex < _queue.length) {
+      await _skip(1);
+    } else {
+      _refreshFlowQueue();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This song won’t be played in Flow again.'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _clearFlowHiddenTracks() async {
+    setState(() => _flowHiddenTrackIds.clear());
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_flowHiddenTracksKey);
+    if (_flowActive) _refreshFlowQueue();
   }
 
   List<({String artist, int plays, int feedback})> _tasteTopArtists() {
@@ -5259,9 +5370,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Row(
                   children: [
                     IconButton(
-                      tooltip: 'Back to welcome',
-                      onPressed: () => setState(() => _flowPage = 0),
-                      icon: Icon(Icons.arrow_back_rounded),
+                      tooltip: _flowActive ? 'Close Flow' : 'Back to welcome',
+                      onPressed: () => setState(() {
+                        if (_flowActive) {
+                          _showFlow = false;
+                        } else {
+                          _flowPage = 0;
+                        }
+                      }),
+                      icon: Icon(
+                        _flowActive
+                            ? Icons.close_rounded
+                            : Icons.arrow_back_rounded,
+                      ),
                     ),
                     Container(
                       width: 28,
@@ -5474,71 +5595,80 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                             SizedBox(height: 10),
-                            Row(
-                              children: [
-                                _artwork(
-                                  _current!.coverArt,
-                                  localArtworkPath: _current!.localArtworkPath,
-                                  size: 66,
-                                  seed: _current!.album,
-                                ),
-                                SizedBox(width: 13),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        _current!.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontFamily: 'DMSansBold',
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                      SizedBox(height: 4),
-                                      Text(
-                                        _current!.artist,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: C.muted,
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                      SizedBox(height: 5),
-                                      Text(
-                                        _flowReason(_current!),
-                                        style: TextStyle(
-                                          color: accent,
-                                          fontSize: 10,
-                                        ),
-                                      ),
-                                    ],
+                            InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () => setState(() {
+                                _showFlow = false;
+                                _showPlayer = true;
+                                _showUpNext = false;
+                              }),
+                              child: Row(
+                                children: [
+                                  _artwork(
+                                    _current!.coverArt,
+                                    localArtworkPath:
+                                        _current!.localArtworkPath,
+                                    size: 66,
+                                    seed: _current!.album,
                                   ),
-                                ),
-                                IconButton(
-                                  tooltip: _player.playing ? 'Pause' : 'Play',
-                                  onPressed: _togglePlayback,
-                                  icon: Icon(
-                                    _player.playing
-                                        ? Icons.pause_rounded
-                                        : Icons.play_arrow_rounded,
-                                    color: accent,
-                                    size: 29,
+                                  SizedBox(width: 13),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          _current!.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontFamily: 'DMSansBold',
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        SizedBox(height: 4),
+                                        Text(
+                                          _current!.artist,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: C.muted,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                        SizedBox(height: 5),
+                                        Text(
+                                          _flowReason(_current!),
+                                          style: TextStyle(
+                                            color: accent,
+                                            fontSize: 10,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                IconButton(
-                                  tooltip: 'Next track',
-                                  onPressed: () => _skip(1),
-                                  icon: Icon(
-                                    Icons.skip_next_rounded,
-                                    color: accent,
-                                    size: 27,
+                                  IconButton(
+                                    tooltip: _player.playing ? 'Pause' : 'Play',
+                                    onPressed: _togglePlayback,
+                                    icon: Icon(
+                                      _player.playing
+                                          ? Icons.pause_rounded
+                                          : Icons.play_arrow_rounded,
+                                      color: accent,
+                                      size: 29,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                  IconButton(
+                                    tooltip: 'Next track',
+                                    onPressed: () => _skip(1),
+                                    icon: Icon(
+                                      Icons.skip_next_rounded,
+                                      color: accent,
+                                      size: 27,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                             SizedBox(height: 8),
                             Row(
@@ -5567,6 +5697,94 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               ],
+                            ),
+                            SizedBox(height: 14),
+                            _card(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'Flow controls',
+                                          style: TextStyle(
+                                            fontFamily: 'DMSansBold',
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        '${math.max(0, _queue.length - _queueIndex - 1)} upcoming',
+                                        style: TextStyle(
+                                          color: C.muted,
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    'Shape the session without changing what you think of the artist.',
+                                    style: TextStyle(
+                                      color: C.muted,
+                                      fontSize: 10,
+                                      height: 1.5,
+                                    ),
+                                  ),
+                                  SizedBox(height: 10),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      OutlinedButton.icon(
+                                        onPressed: _togglePlayback,
+                                        icon: Icon(
+                                          _player.playing
+                                              ? Icons.pause_rounded
+                                              : Icons.play_arrow_rounded,
+                                          size: 16,
+                                        ),
+                                        label: Text(
+                                          _player.playing
+                                              ? 'Pause Flow'
+                                              : 'Resume Flow',
+                                        ),
+                                      ),
+                                      OutlinedButton.icon(
+                                        onPressed: () => _skip(1),
+                                        icon: Icon(
+                                          Icons.skip_next_rounded,
+                                          size: 16,
+                                        ),
+                                        label: Text('Skip track'),
+                                      ),
+                                      OutlinedButton.icon(
+                                        onPressed: _clearFlowHiddenTracks,
+                                        icon: Icon(
+                                          Icons.restart_alt_rounded,
+                                          size: 16,
+                                        ),
+                                        label: Text(
+                                          'Restore hidden (${_flowHiddenTrackIds.length})',
+                                        ),
+                                      ),
+                                      TextButton.icon(
+                                        onPressed: () => setState(() {
+                                          _flowActive = false;
+                                          _showFlow = false;
+                                          _showPlayer = false;
+                                        }),
+                                        icon: Icon(
+                                          Icons.stop_circle_outlined,
+                                          size: 16,
+                                        ),
+                                        label: Text('End Flow'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                           SizedBox(height: 22),
@@ -5947,10 +6165,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Row(
                     children: [
                       IconButton(
-                        tooltip: 'Back to library',
+                        tooltip: _flowActive
+                            ? 'Back to Flow'
+                            : 'Back to library',
                         onPressed: () => setState(() {
                           _showPlayer = false;
                           _showUpNext = false;
+                          if (_flowActive) _showFlow = true;
                         }),
                         icon: Icon(Icons.chevron_left_rounded, size: 30),
                       ),
@@ -5959,7 +6180,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
-                            'NOW PLAYING',
+                            _flowActive ? 'NAVIKA FLOW' : 'NOW PLAYING',
                             style: TextStyle(
                               color: _artworkAccentColor ?? C.lime,
                               fontFamily: 'DMSansBold',
@@ -5969,7 +6190,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           SizedBox(height: 4),
                           Text(
-                            'Your music',
+                            _flowActive ? 'Your listening mix' : 'Your music',
                             style: TextStyle(
                               fontFamily: 'DMSansMedium',
                               fontSize: 12,
@@ -6100,6 +6321,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             fontSize: 12,
                                           ),
                                         ),
+                                        _flowPlayerDetails(track),
                                         SizedBox(height: 8),
                                         _playbackProgress(duration),
                                         SizedBox(height: 0),
@@ -6355,6 +6577,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             ),
                                           ),
                                         ),
+                                        _flowPlayerDetails(track),
                                         if (_showVisualizer) ...[
                                           SizedBox(height: 12),
                                           _visualizer(),
@@ -6684,6 +6907,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                               ),
                                             ),
                                           ),
+                                          _flowPlayerDetails(track),
                                           if (_showVisualizer) ...[
                                             SizedBox(height: 8),
                                             _visualizer(),
