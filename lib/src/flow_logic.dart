@@ -31,13 +31,18 @@ extension _FlowLogicMethods on _HomeScreenState {
   }
 
   List<MusicTrack> _buildFlowQueue() {
-    final tracks = _modeTracks
-        .where(
-          (track) =>
-              !_dismissedRecommendations.contains(track.id) &&
-              !_flowHiddenTrackIds.contains(track.id),
-        )
-        .toList();
+    // Local and server libraries can contain the same song more than once.
+    // Keep one candidate per stable track ID before ranking or sampling.
+    final uniqueTracks = <String, MusicTrack>{};
+    for (final track in _modeTracks) {
+      if (_dismissedRecommendations.contains(track.id) ||
+          _flowHiddenTrackIds.contains(track.id) ||
+          track.id == _current?.id) {
+        continue;
+      }
+      uniqueTracks.putIfAbsent(track.id, () => track);
+    }
+    final tracks = uniqueTracks.values.toList();
     if (tracks.isEmpty) return [];
 
     final artistPlays = <String, int>{};
@@ -61,9 +66,7 @@ extension _FlowLogicMethods on _HomeScreenState {
         .skip(math.max(0, _history.length - 18))
         .map((event) => event.id)
         .toSet();
-    final candidates = tracks.where((track) => track.id != _current?.id).map((
-      track,
-    ) {
+    final candidates = tracks.map((track) {
       final artist = track.artist.toLowerCase();
       final album = track.album.toLowerCase();
       final artistFamiliarity =
@@ -86,9 +89,10 @@ extension _FlowLogicMethods on _HomeScreenState {
 
     final queue = <MusicTrack>[];
     final remaining = List.of(candidates);
+    final random = math.Random();
     while (remaining.isNotEmpty && queue.length < 80) {
-      var bestIndex = 0;
-      var bestScore = double.negativeInfinity;
+      final adjustedScores = <double>[];
+      var highestScore = double.negativeInfinity;
       for (var i = 0; i < remaining.length; i++) {
         final candidate = remaining[i];
         final recentArtistCount = queue
@@ -99,18 +103,37 @@ extension _FlowLogicMethods on _HomeScreenState {
                   candidate.track.artist.toLowerCase(),
             )
             .length;
-        final score = candidate.score - recentArtistCount * _flowVariety * .42;
-        if (score > bestScore) {
-          bestScore = score;
-          bestIndex = i;
+        // The variety slider changes how strongly recent artists are avoided.
+        final score = candidate.score - recentArtistCount * _flowVariety * .72;
+        adjustedScores.add(score);
+        highestScore = math.max(highestScore, score);
+      }
+
+      // Weighted random sampling makes the mix feel fresh without ignoring
+      // the listener profile. Familiarity/discovery, favorites, song feedback,
+      // recent plays, and the two sliders all contribute to each candidate's
+      // weight. Removing each pick guarantees sampling without replacement.
+      final temperature = .18 + (_flowVariety * .2);
+      final weights = adjustedScores
+          .map((score) => math.exp((score - highestScore) / temperature))
+          .toList();
+      final totalWeight = weights.fold<double>(
+        0,
+        (sum, weight) => sum + weight,
+      );
+      var draw = random.nextDouble() * totalWeight;
+      var selectedIndex = weights.length - 1;
+      for (var i = 0; i < weights.length; i++) {
+        draw -= weights[i];
+        if (draw <= 0) {
+          selectedIndex = i;
+          break;
         }
       }
-      queue.add(remaining.removeAt(bestIndex).track);
+      queue.add(remaining.removeAt(selectedIndex).track);
     }
 
-    // Keep the session useful even when the current song is the only library
-    // item, rather than returning a queue that can never advance.
-    return queue.isEmpty ? [tracks.first] : queue;
+    return queue;
   }
 
   void _refreshFlowQueue() {
@@ -130,7 +153,9 @@ extension _FlowLogicMethods on _HomeScreenState {
     final picks = _buildFlowQueue();
     if (picks.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Load a music library to start Navika Flow.')),
+        SnackBar(
+          content: Text('Add more available songs to start Navika Flow.'),
+        ),
       );
       return;
     }
