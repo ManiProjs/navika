@@ -519,10 +519,6 @@ extension _DiscoveryMethods on _HomeScreenState {
             ),
           ),
           SizedBox(height: 13),
-          Text(
-            'Use your server’s HTTPS URL. Plain HTTP connections are not supported.',
-            style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
-          ),
         ],
       ),
     );

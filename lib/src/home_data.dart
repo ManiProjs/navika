@@ -497,22 +497,6 @@ extension _HomeDataMethods on _HomeScreenState {
     final username = _username.text.trim();
     final password = _password.text;
 
-    final parsedUrl = Uri.tryParse(url);
-    final validUrl =
-        parsedUrl != null &&
-        parsedUrl.hasAuthority &&
-        parsedUrl.host.isNotEmpty &&
-        parsedUrl.userInfo.isEmpty &&
-        parsedUrl.query.isEmpty &&
-        parsedUrl.fragment.isEmpty &&
-        parsedUrl.scheme.toLowerCase() == 'https';
-    if (!validUrl) {
-      _updateState(
-        () => _error = 'Enter a valid HTTPS server URL. Plain HTTP connections are not supported.',
-      );
-      return;
-    }
-
     if (username.isEmpty || password.isEmpty) {
       _updateState(
         () => _error = 'Enter your Navidrome username and password.',

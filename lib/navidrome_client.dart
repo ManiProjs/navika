@@ -167,10 +167,6 @@ class NavidromeClient {
     String endpoint, [
     Map<String, String> params = const {},
   ]) async {
-    final parsedBaseUrl = Uri.parse(baseUrl);
-    if (parsedBaseUrl.scheme != 'https') {
-      throw StateError('Navika requires HTTPS for remote Navidrome servers.');
-    }
     final uri = Uri.parse('$baseUrl/rest/$endpoint.view')
         .replace(queryParameters: {..._authParams(), ...params});
 
