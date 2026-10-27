@@ -6,6 +6,15 @@ import android.database.Cursor
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.media.MediaMetadataRetriever
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import java.nio.charset.StandardCharsets
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import com.ryanheise.audioservice.AudioServiceActivity
@@ -13,12 +22,38 @@ import java.util.concurrent.Executors
 
 class MainActivity : AudioServiceActivity() {
     private val channelName = "app.navika/local_folders"
+    private val credentialsChannelName = "app.navika/secure_credentials"
+    private val credentialsKeyAlias = "app.navika.credentials.v1"
+    private val credentialsPrefs by lazy {
+        getSharedPreferences("navika_secure_credentials", MODE_PRIVATE)
+    }
     private val pickFolderRequest = 4817
     private var pendingFolderResult: MethodChannel.Result? = null
     private val ioExecutor = Executors.newSingleThreadExecutor()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, credentialsChannelName)
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "read" -> result.success(readSecureCredentials())
+                        "write" -> {
+                            val value = call.argument<String>("value")
+                                ?: throw IllegalArgumentException("Missing credential value")
+                            writeSecureCredentials(value)
+                            result.success(null)
+                        }
+                        "delete" -> {
+                            deleteSecureCredentials()
+                            result.success(null)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (error: Exception) {
+                    result.error("secure_storage_failed", error.message ?: error.toString(), null)
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -97,6 +132,52 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun credentialsSecretKey(): SecretKey {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val existing = keyStore.getKey(credentialsKeyAlias, null) as? SecretKey
+        if (existing != null) return existing
+
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(
+                credentialsKeyAlias,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setRandomizedEncryptionRequired(true)
+                .build(),
+        )
+        return generator.generateKey()
+    }
+
+    private fun readSecureCredentials(): String? {
+        val encoded = credentialsPrefs.getString("payload", null) ?: return null
+        val packed = Base64.decode(encoded, Base64.NO_WRAP)
+        if (packed.size <= 12) throw IllegalStateException("Stored credentials are invalid")
+        val iv = packed.copyOfRange(0, 12)
+        val encrypted = packed.copyOfRange(12, packed.size)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, credentialsSecretKey(), GCMParameterSpec(128, iv))
+        return String(cipher.doFinal(encrypted), StandardCharsets.UTF_8)
+    }
+
+    private fun writeSecureCredentials(value: String) {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, credentialsSecretKey())
+        val encrypted = cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
+        val packed = cipher.iv + encrypted
+        if (!credentialsPrefs.edit().putString("payload", Base64.encodeToString(packed, Base64.NO_WRAP)).commit()) {
+            throw IllegalStateException("Could not persist encrypted credentials")
+        }
+    }
+
+    private fun deleteSecureCredentials() {
+        credentialsPrefs.edit().remove("payload").commit()
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (keyStore.containsAlias(credentialsKeyAlias)) keyStore.deleteEntry(credentialsKeyAlias)
     }
 
     @Deprecated("Deprecated in Android API; required for the FlutterActivity result callback")

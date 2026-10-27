@@ -86,7 +86,7 @@ extension _FlowUiMethods on _HomeScreenState {
                           style: TextStyle(
                             color: accent,
                             fontFamily: 'DMSansBold',
-                            fontSize: 9,
+                            fontSize: 10,
                             letterSpacing: 1,
                           ),
                         ),
@@ -178,7 +178,7 @@ extension _FlowUiMethods on _HomeScreenState {
                                       'DISCOVER',
                                       style: TextStyle(
                                         color: C.muted,
-                                        fontSize: 9,
+                                        fontSize: 10,
                                         letterSpacing: 1,
                                       ),
                                     ),
@@ -186,7 +186,7 @@ extension _FlowUiMethods on _HomeScreenState {
                                       'FAMILIAR',
                                       style: TextStyle(
                                         color: C.muted,
-                                        fontSize: 9,
+                                        fontSize: 10,
                                         letterSpacing: 1,
                                       ),
                                     ),
@@ -245,7 +245,7 @@ extension _FlowUiMethods on _HomeScreenState {
                               style: TextStyle(
                                 color: accent,
                                 fontFamily: 'DMSansBold',
-                                fontSize: 9,
+                                fontSize: 10,
                                 letterSpacing: 1.3,
                               ),
                             ),

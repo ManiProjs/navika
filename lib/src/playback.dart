@@ -1,7 +1,22 @@
 part of '../main.dart';
 
 extension _PlaybackMethods on _HomeScreenState {
-  Future<void> _play(MusicTrack track, {List<MusicTrack>? playlist}) async {
+  Future<void> _play(MusicTrack track, {List<MusicTrack>? playlist}) {
+    final requestId = ++_playRequestId;
+    final operation = _playbackOperation.then(
+      (_) => _playInternal(track, playlist: playlist, requestId: requestId),
+    );
+    // A failed playback attempt must not poison the serialization chain.
+    _playbackOperation = operation.catchError((Object _) {});
+    return operation;
+  }
+
+  Future<void> _playInternal(
+    MusicTrack track, {
+    List<MusicTrack>? playlist,
+    required int requestId,
+  }) async {
+    if (requestId != _playRequestId) return;
     final client = _client;
     if (client == null && !track.isLocal) {
       _selectTab(AppTab.library);
@@ -39,6 +54,7 @@ extension _PlaybackMethods on _HomeScreenState {
               tag: mediaItem,
             );
       await _player.setAudioSource(audioSource);
+      if (requestId != _playRequestId) return;
       await _player.setLoopMode(_repeatOne ? LoopMode.one : LoopMode.off);
       await _player.setSpeed(_playbackSpeed);
       final started = _player.playerStateStream
@@ -53,7 +69,7 @@ extension _PlaybackMethods on _HomeScreenState {
       );
       await started;
 
-      if (!mounted) return;
+      if (!mounted || requestId != _playRequestId) return;
       _updateState(() {
         _queue = finalQueue;
         _queueIndex = index;
@@ -77,9 +93,10 @@ extension _PlaybackMethods on _HomeScreenState {
       );
       _history = [..._history, event].takeLast(200).toList();
       _invalidateRecommendationCaches();
+      // History influences the next Flow session, but never reshuffle the
+      // active Flow queue just because the current song changed.
       _flowQueueDirty = true;
       _scheduleHistorySave();
-      if (mounted && _flowActive) _refreshFlowQueue();
     } catch (error) {
       if (!mounted) return;
       _updateState(() => _error = _describePlaybackError(error));

@@ -231,6 +231,11 @@ jobs:
       - name: Check out release notes
         uses: actions/checkout@v4
 
+      - name: Prepare notes for this release
+        shell: bash
+        run: |
+          awk '/^---$/ { exit } { print }' RELEASE_NOTES.md > "$RUNNER_TEMP/RELEASE_NOTES.md"
+
       - name: Download all platform builds
         uses: actions/download-artifact@v4
         with:
@@ -242,7 +247,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Navika ${{ github.ref_name }}
-          body_path: RELEASE_NOTES.md
+          body_path: ${{ runner.temp }}/RELEASE_NOTES.md
           generate_release_notes: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: dist/*

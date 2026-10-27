@@ -94,27 +94,22 @@ extension _FlowLogicMethods on _HomeScreenState {
           _flowFamiliarity * familiarity +
           (1 - _flowFamiliarity) * discovery +
           trackFeedback;
-      return (track: track, score: score);
+      return (track: track, artistKey: artist, score: score);
     }).toList();
 
     final queue = <MusicTrack>[];
     final remaining = List.of(candidates);
+    final recentArtistCounts = <String, int>{};
     final random = math.Random();
     while (remaining.isNotEmpty && queue.length < 80) {
       final adjustedScores = <double>[];
       var highestScore = double.negativeInfinity;
       for (var i = 0; i < remaining.length; i++) {
         final candidate = remaining[i];
-        final recentArtistCount = queue
-            .skip(math.max(0, queue.length - 4))
-            .where(
-              (track) =>
-                  track.artist.toLowerCase() ==
-                  candidate.track.artist.toLowerCase(),
-            )
-            .length;
         // The variety slider changes how strongly recent artists are avoided.
-        final score = candidate.score - recentArtistCount * _flowVariety * .72;
+        final score =
+            candidate.score -
+            (recentArtistCounts[candidate.artistKey] ?? 0) * _flowVariety * .72;
         adjustedScores.add(score);
         highestScore = math.max(highestScore, score);
       }
@@ -140,7 +135,22 @@ extension _FlowLogicMethods on _HomeScreenState {
           break;
         }
       }
-      queue.add(remaining.removeAt(selectedIndex).track);
+      final selected = remaining.removeAt(selectedIndex);
+      if (queue.length >= 4) {
+        final expiredArtist = queue[queue.length - 4].artist.toLowerCase();
+        final count = recentArtistCounts[expiredArtist] ?? 0;
+        if (count <= 1) {
+          recentArtistCounts.remove(expiredArtist);
+        } else {
+          recentArtistCounts[expiredArtist] = count - 1;
+        }
+      }
+      queue.add(selected.track);
+      recentArtistCounts.update(
+        selected.artistKey,
+        (count) => count + 1,
+        ifAbsent: () => 1,
+      );
     }
 
     _cachedFlowQueue = queue;
@@ -188,9 +198,6 @@ extension _FlowLogicMethods on _HomeScreenState {
     }
     if ((_tasteTrackFeedback[track.id] ?? 0) < 0) {
       return 'You asked for less of this song';
-    }
-    if ((_tasteTrackFeedback[track.id] ?? 0) > 0) {
-      return 'You asked for more like this song';
     }
     if (_favorites.contains(track.id)) return 'One of your favorites';
     final artistPlays = _history

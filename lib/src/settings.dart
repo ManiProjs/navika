@@ -2,6 +2,7 @@ part of '../main.dart';
 
 extension _SettingsMethods on _HomeScreenState {
   Widget _settingsOverlay({required bool isMobile}) {
+    final tasteTopArtists = _tasteTopArtists();
     final duration = _reduceMotion
         ? Duration.zero
         : Duration(milliseconds: 170);
@@ -95,6 +96,7 @@ extension _SettingsMethods on _HomeScreenState {
                                     ),
                                   ),
                                   IconButton(
+                                    tooltip: 'Close settings',
                                     onPressed: () => _updateState(
                                       () => _showSettings = false,
                                     ),
@@ -396,7 +398,7 @@ extension _SettingsMethods on _HomeScreenState {
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         color: C.muted,
-                                        fontSize: 9,
+                                        fontSize: 10,
                                       ),
                                     ),
                                     trailing: IconButton(
@@ -447,7 +449,7 @@ extension _SettingsMethods on _HomeScreenState {
                                   ),
                                 ),
                               ),
-                              ..._tasteTopArtists().map(
+                              ...tasteTopArtists.map(
                                 (artist) => ListTile(
                                   contentPadding: EdgeInsets.zero,
                                   dense: true,
@@ -485,7 +487,7 @@ extension _SettingsMethods on _HomeScreenState {
                                         ),
                                 ),
                               ),
-                              if (_tasteTopArtists().isEmpty)
+                              if (tasteTopArtists.isEmpty)
                                 Padding(
                                   padding: EdgeInsets.only(bottom: 10),
                                   child: Text(
@@ -549,13 +551,21 @@ extension _SettingsMethods on _HomeScreenState {
                                 onTap: () async {
                                   _updateState(() {
                                     _history.clear();
+                                    _invalidateRecommendationCaches();
+                                    _flowQueueDirty = true;
                                     _showSettings = false;
                                   });
                                   final preferences =
                                       await SharedPreferences.getInstance();
                                   await preferences.remove(_historyKey);
+                                  if (mounted && _flowActive) {
+                                    _refreshFlowQueue();
+                                  }
                                 },
                               ),
+                              _credentialStorageWarning(),
+                              if (Platform.isIOS || Platform.isMacOS)
+                                SizedBox(height: 12),
                               if (_connected)
                                 ListTile(
                                   contentPadding: EdgeInsets.zero,
@@ -581,7 +591,7 @@ extension _SettingsMethods on _HomeScreenState {
                                 'Navika · Your listening history stays on this device.',
                                 style: TextStyle(
                                   color: C.muted,
-                                  fontSize: 9,
+                                  fontSize: 10,
                                   height: 1.6,
                                 ),
                               ),
@@ -608,7 +618,7 @@ extension _SettingsMethods on _HomeScreenState {
         style: TextStyle(
           color: C.lime,
           fontFamily: 'DMSansBold',
-          fontSize: 9,
+          fontSize: 10,
           letterSpacing: 1.3,
         ),
       ),

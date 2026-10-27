@@ -2,6 +2,7 @@ part of '../main.dart';
 
 extension _LibraryPageMethods on _HomeScreenState {
   Widget _playlistsPage() {
+    final allTracksById = _allTracksById;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -49,9 +50,12 @@ extension _LibraryPageMethods on _HomeScreenState {
           else
             ..._playlists.entries.map((entry) {
               final tracks = entry.value
-                  .map((id) => _tracksById[id])
+                  .map((id) => allTracksById[id])
                   .whereType<MusicTrack>()
                   .toList();
+              final visibleTracks = _expandedPlaylists.contains(entry.key)
+                  ? tracks
+                  : tracks.take(20).toList();
 
               return Padding(
                 padding: EdgeInsets.only(bottom: 14),
@@ -104,13 +108,29 @@ extension _LibraryPageMethods on _HomeScreenState {
                       ),
                       if (tracks.isNotEmpty) ...[
                         SizedBox(height: 12),
-                        ...tracks.asMap().entries.map(
+                        ...visibleTracks.asMap().entries.map(
                           (item) => _playlistTrackRow(
                             entry.key,
                             item.value,
                             item.key,
                           ),
                         ),
+                        if (tracks.length > 20)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton(
+                              onPressed: () => _updateState(() {
+                                if (!_expandedPlaylists.add(entry.key)) {
+                                  _expandedPlaylists.remove(entry.key);
+                                }
+                              }),
+                              child: Text(
+                                _expandedPlaylists.contains(entry.key)
+                                    ? 'Show fewer tracks'
+                                    : 'Show all ${tracks.length} tracks',
+                              ),
+                            ),
+                          ),
                       ],
                       SizedBox(height: 8),
                       TextButton.icon(
@@ -209,7 +229,7 @@ extension _LibraryPageMethods on _HomeScreenState {
       onTap: () => _play(
         track,
         playlist: _playlists[playlist]!
-            .map((id) => _tracksById[id])
+            .map((id) => _allTracksById[id])
             .whereType<MusicTrack>()
             .toList(),
       ),

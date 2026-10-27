@@ -234,6 +234,7 @@ extension _DiscoveryMethods on _HomeScreenState {
                 suffixIcon: _search.text.isEmpty
                     ? null
                     : IconButton(
+                        tooltip: 'Clear search',
                         onPressed: () {
                           _search.clear();
                           _runSearch('');
@@ -301,6 +302,7 @@ extension _DiscoveryMethods on _HomeScreenState {
               ),
             if (_connected)
               IconButton(
+                tooltip: 'Disconnect server',
                 onPressed: _logout,
                 icon: Icon(Icons.logout_rounded, color: C.muted),
               ),
@@ -446,23 +448,43 @@ extension _DiscoveryMethods on _HomeScreenState {
             controller: _url,
             keyboardType: TextInputType.url,
             autocorrect: false,
-            decoration: InputDecoration(hintText: 'https://music.example.com'),
+            autofillHints: const [AutofillHints.url],
+            textInputAction: TextInputAction.next,
+            decoration: InputDecoration(
+              labelText: 'Server URL',
+              hintText: 'https://music.example.com',
+            ),
           ),
           SizedBox(height: 14),
           _fieldLabel('USERNAME'),
           TextField(
             controller: _username,
+            keyboardType: TextInputType.text,
             autocorrect: false,
-            decoration: InputDecoration(hintText: 'Your Navidrome username'),
+            autofillHints: const [AutofillHints.username],
+            textInputAction: TextInputAction.next,
+            decoration: InputDecoration(
+              labelText: 'Username',
+              hintText: 'Your Navidrome username',
+            ),
           ),
           SizedBox(height: 14),
           _fieldLabel('PASSWORD'),
           TextField(
             controller: _password,
             obscureText: true,
-            decoration: InputDecoration(hintText: 'Your password'),
+            autocorrect: false,
+            enableSuggestions: false,
+            autofillHints: const [AutofillHints.password],
+            textInputAction: TextInputAction.done,
+            decoration: InputDecoration(
+              labelText: 'Password',
+              hintText: 'Your password',
+            ),
             onSubmitted: (_) => _connect(),
           ),
+          _credentialStorageWarning(),
+          if (Platform.isIOS || Platform.isMacOS) SizedBox(height: 12),
           if (_error.isNotEmpty) ...[
             SizedBox(height: 12),
             Text(_error, style: TextStyle(color: C.danger, fontSize: 12)),
@@ -498,7 +520,7 @@ extension _DiscoveryMethods on _HomeScreenState {
           ),
           SizedBox(height: 13),
           Text(
-            'Use the same URL you use to open Navidrome in your browser.',
+            'Use your server’s HTTPS URL. Plain HTTP connections are not supported.',
             style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
           ),
         ],

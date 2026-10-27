@@ -1,6 +1,23 @@
 part of '../main.dart';
 
 extension _SharedWidgetMethods on _HomeScreenState {
+  Widget _credentialStorageWarning() {
+    if (!Platform.isIOS && !Platform.isMacOS) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: C.danger.withValues(alpha: .08),
+        border: Border.all(color: C.danger.withValues(alpha: .45)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: const Text(
+        'WARNING: Your Navidrome credentials are stored in plain text because of.... well.... Apple!.',
+        style: TextStyle(fontSize: 12, height: 1.5),
+      ),
+    );
+  }
+
   List<Color> _playerAmbientColors() {
     // Sample the current cover for a restrained ambient tint. Missing or
     // unreadable artwork falls back to Navika's signature lime.
@@ -299,7 +316,7 @@ extension _SharedWidgetMethods on _HomeScreenState {
             style: TextStyle(
               color: C.muted,
               fontFamily: 'DMSansBold',
-              fontSize: 9,
+              fontSize: 10,
               letterSpacing: .5,
             ),
           ),

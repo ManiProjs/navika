@@ -85,6 +85,9 @@ abstract final class C {
 }
 
 const _credentialsKey = 'navika.navidrome.credentials';
+const _secureCredentialsChannel = MethodChannel(
+  'app.navika/secure_credentials',
+);
 const _historyKey = 'navika.listening.history';
 const _favoritesKey = 'navika.favorites';
 const _motionKey = 'navika.reduce-motion';
@@ -184,6 +187,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _queueIndexNotifier,
   ]);
   final List<StreamSubscription<dynamic>> _playerSubscriptions = [];
+  Future<void> _playbackOperation = Future<void>.value();
+  int _playRequestId = 0;
   final GlobalKey _progressBarKey = GlobalKey();
   final TextEditingController _search = TextEditingController();
   final TextEditingController _url = TextEditingController();
@@ -218,6 +223,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   List<ListeningEvent> _history = [];
   Set<String> _favorites = <String>{};
   Map<String, List<String>> _playlists = {};
+  final Set<String> _expandedPlaylists = {};
 
   MusicTrack? _current;
   int _queueIndex = 0;

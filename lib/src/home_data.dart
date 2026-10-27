@@ -129,6 +129,13 @@ extension _HomeDataMethods on _HomeScreenState {
       .whereType<MusicTrack>()
       .toList();
 
+  Map<String, MusicTrack> get _allTracksById => {
+    for (final track in _tracks) track.id: track,
+    for (final track in _localTracks) track.id: track,
+    for (final track in _queue) track.id: track,
+    ?_current?.id: _current!,
+  };
+
   void _selectTab(AppTab tab) {
     _updateState(() {
       _tab = tab;
@@ -424,9 +431,17 @@ extension _HomeDataMethods on _HomeScreenState {
       }
     }
 
-    // Credentials live in ordinary local preferences so desktop builds do not
-    // require Keychain access or a paid Developer ID signing identity.
-    final saved = preferences.getString(_credentialsKey);
+    String? saved;
+    try {
+      saved = await _readCredentialJson(preferences);
+    } catch (error) {
+      if (!mounted) return;
+      _updateState(() {
+        _showLogin = true;
+        _error = 'Secure credential storage is unavailable: $error';
+      });
+      return;
+    }
     if (saved == null) {
       if (mounted) {
         _updateState(() {
@@ -480,10 +495,18 @@ extension _HomeDataMethods on _HomeScreenState {
     final username = _username.text.trim();
     final password = _password.text;
 
-    if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(url)) {
+    final parsedUrl = Uri.tryParse(url);
+    final validUrl =
+        parsedUrl != null &&
+        parsedUrl.hasAuthority &&
+        parsedUrl.host.isNotEmpty &&
+        parsedUrl.userInfo.isEmpty &&
+        parsedUrl.query.isEmpty &&
+        parsedUrl.fragment.isEmpty &&
+        parsedUrl.scheme.toLowerCase() == 'https';
+    if (!validUrl) {
       _updateState(
-        () => _error =
-            'Enter a complete server URL, including http:// or https://.',
+        () => _error = 'Enter a valid HTTPS server URL. Plain HTTP connections are not supported.',
       );
       return;
     }
@@ -511,10 +534,7 @@ extension _HomeDataMethods on _HomeScreenState {
       await client.connect();
 
       final preferences = await SharedPreferences.getInstance();
-      await preferences.setString(
-        _credentialsKey,
-        jsonEncode(credentials.toJson()),
-      );
+      await _writeCredentialJson(preferences, jsonEncode(credentials.toJson()));
 
       if (!mounted) return;
 
@@ -542,6 +562,186 @@ extension _HomeDataMethods on _HomeScreenState {
         _error = 'Connection failed: $error';
       });
     }
+  }
+
+  Future<String?> _readCredentialJson(SharedPreferences preferences) async {
+    final legacy = preferences.getString(_credentialsKey);
+
+    if (Platform.isAndroid) {
+      final stored = await _secureCredentialsChannel.invokeMethod<String>(
+        'read',
+      );
+      if (stored != null) {
+        if (legacy != null) await preferences.remove(_credentialsKey);
+        return stored;
+      }
+      if (legacy == null) return null;
+      await _secureCredentialsChannel.invokeMethod<void>('write', {
+        'value': legacy,
+      });
+      final verified = await _secureCredentialsChannel.invokeMethod<String>(
+        'read',
+      );
+      if (verified != legacy) {
+        throw StateError('Could not verify encrypted credential migration');
+      }
+      await preferences.remove(_credentialsKey);
+      return verified;
+    }
+
+    if (Platform.isLinux) {
+      final stored = await _linuxKeyringRead();
+      if (stored != null) {
+        if (legacy != null) await preferences.remove(_credentialsKey);
+        return stored;
+      }
+      if (legacy == null) return null;
+      await _linuxKeyringWrite(legacy);
+      await preferences.remove(_credentialsKey);
+      return legacy;
+    }
+
+    if (Platform.isWindows) {
+      if (legacy == null) return null;
+      if (legacy.startsWith('dpapi:v1:')) {
+        return _windowsDpapiDecrypt(legacy.substring('dpapi:v1:'.length));
+      }
+      // Migrate legacy plain-text preferences to user-bound Windows DPAPI.
+      final encrypted = await _windowsDpapiEncrypt(legacy);
+      await preferences.setString(_credentialsKey, 'dpapi:v1:$encrypted');
+      return legacy;
+    }
+
+    // Apple platforms intentionally retain plain-text preferences, as noted
+    // in the UI. No signing identity or Keychain entitlement is required.
+    return legacy;
+  }
+
+  Future<void> _writeCredentialJson(
+    SharedPreferences preferences,
+    String value,
+  ) async {
+    if (Platform.isAndroid) {
+      await _secureCredentialsChannel.invokeMethod<void>('write', {
+        'value': value,
+      });
+      final verified = await _secureCredentialsChannel.invokeMethod<String>(
+        'read',
+      );
+      if (verified != value) {
+        throw StateError('Could not verify encrypted credential storage');
+      }
+      await preferences.remove(_credentialsKey);
+      return;
+    }
+    if (Platform.isLinux) {
+      await _linuxKeyringWrite(value);
+      await preferences.remove(_credentialsKey);
+      return;
+    }
+    if (Platform.isWindows) {
+      final encrypted = await _windowsDpapiEncrypt(value);
+      await preferences.setString(_credentialsKey, 'dpapi:v1:$encrypted');
+      return;
+    }
+    if (Platform.isIOS || Platform.isMacOS) {
+      await preferences.setString(_credentialsKey, value);
+      return;
+    }
+    throw UnsupportedError(
+      'Secure credential storage is unavailable on this platform',
+    );
+  }
+
+  Future<void> _deleteCredentialJson(SharedPreferences preferences) async {
+    if (Platform.isAndroid) {
+      await _secureCredentialsChannel.invokeMethod<void>('delete');
+    } else if (Platform.isLinux) {
+      await _linuxKeyringDelete();
+    }
+    await preferences.remove(_credentialsKey);
+  }
+
+  Future<String?> _linuxKeyringRead() async {
+    final result = await Process.run('secret-tool', [
+      'lookup',
+      'app',
+      'navika',
+      'kind',
+      'credentials',
+    ]);
+    if (result.exitCode != 0) return null;
+    final value = (result.stdout as String).trimRight();
+    return value.isEmpty ? null : value;
+  }
+
+  Future<void> _linuxKeyringWrite(String value) async {
+    final process = await Process.start('secret-tool', [
+      'store',
+      '--label=Navika Navidrome credentials',
+      'app',
+      'navika',
+      'kind',
+      'credentials',
+    ]);
+    process.stdin.write(value);
+    await process.stdin.close();
+    final output = await process.stdout.transform(utf8.decoder).join();
+    final error = await process.stderr.transform(utf8.decoder).join();
+    final exitCode = await process.exitCode;
+    if (exitCode != 0) {
+      throw StateError(
+        'Linux keyring could not store credentials: ${error.trim().isEmpty ? output.trim() : error.trim()}',
+      );
+    }
+  }
+
+  Future<void> _linuxKeyringDelete() async {
+    final result = await Process.run('secret-tool', [
+      'clear',
+      'app',
+      'navika',
+      'kind',
+      'credentials',
+    ]);
+    if (result.exitCode != 0) {
+      throw StateError('Linux keyring could not remove saved credentials');
+    }
+  }
+
+  Future<String> _windowsDpapiEncrypt(String value) async =>
+      _runWindowsDpapi(r'''
+$plain = [Console]::In.ReadToEnd()
+$secure = ConvertTo-SecureString $plain -AsPlainText -Force
+[Console]::Out.Write((ConvertFrom-SecureString $secure))
+''', value);
+
+  Future<String> _windowsDpapiDecrypt(String value) async =>
+      _runWindowsDpapi(r'''
+$encrypted = [Console]::In.ReadToEnd()
+$secure = ConvertTo-SecureString $encrypted
+$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+try { [Console]::Out.Write([Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)) }
+finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+''', value);
+
+  Future<String> _runWindowsDpapi(String script, String input) async {
+    final process = await Process.start('powershell.exe', [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script,
+    ]);
+    process.stdin.write(input);
+    await process.stdin.close();
+    final output = await process.stdout.transform(utf8.decoder).join();
+    final error = await process.stderr.transform(utf8.decoder).join();
+    final exitCode = await process.exitCode;
+    if (exitCode != 0) {
+      throw StateError('Windows credential protection failed: ${error.trim()}');
+    }
+    return output;
   }
 
   Future<void> _loadLibrary({bool force = false}) async {
@@ -865,9 +1065,25 @@ extension _HomeDataMethods on _HomeScreenState {
 
       // Keep manually imported tracks and tracks in folders whose access was
       // temporarily denied; remove files that disappeared from readable folders.
+      final safFolders = Platform.isAndroid
+          ? _localFolders.where((folder) => folder.startsWith('saf:')).toList()
+          : const <String>[];
+      final allSafFoldersReadable = safFolders.every(
+        (folder) => !inaccessibleFolders.contains(folder),
+      );
+      final discoveredPaths = discovered.keys.toSet();
       final retained = _localTracks.where((track) {
         final path = track.localPath;
         if (path == null) return false;
+        // SAF document URIs are opaque and cannot be compared to a saved tree
+        // URI with startsWith(). Once every watched tree was scanned
+        // successfully, retain a document only if the provider returned it.
+        // If any tree is inaccessible, preserve the indexed URI until access
+        // is restored rather than accidentally deleting the user's library.
+        if (Platform.isAndroid && path.startsWith('content://')) {
+          if (safFolders.isEmpty || !allSafFoldersReadable) return true;
+          return discoveredPaths.contains('local:$path');
+        }
         // Old Android versions copied SAF audio into app-private storage.
         // Once a provider URI has been indexed, don't retain those duplicate
         // cached tracks alongside the original files.

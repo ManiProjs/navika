@@ -574,29 +574,7 @@ extension _HomeLayoutMethods on _HomeScreenState {
             style: TextStyle(color: C.muted, fontSize: 11, height: 1.6),
           )
         else
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _mostPlayedArtists.map((artist) {
-              final artistTracks = _modeTracks
-                  .where(
-                    (track) =>
-                        track.artist.toLowerCase() ==
-                        artist.artist.toLowerCase(),
-                  )
-                  .toList();
-              return ActionChip(
-                avatar: Icon(Icons.graphic_eq_rounded, size: 16),
-                label: Text('${artist.artist} · ${artist.count} plays'),
-                onPressed: artistTracks.isEmpty
-                    ? null
-                    : () => _play(artist.track, playlist: artistTracks),
-                backgroundColor: C.surface,
-                side: BorderSide(color: C.border),
-                labelStyle: TextStyle(color: C.text, fontSize: 11),
-              );
-            }).toList(),
-          ),
+          _artistRotationChips(),
         SizedBox(height: 20),
         _recommendationShelf(
           'Picked for you',
@@ -631,6 +609,33 @@ extension _HomeLayoutMethods on _HomeScreenState {
               .map((entry) => _trackRow(entry.value, entry.key)),
         SizedBox(height: 20),
       ],
+    );
+  }
+
+  Widget _artistRotationChips() {
+    final tracksByArtist = <String, List<MusicTrack>>{};
+    for (final track in _modeTracks) {
+      tracksByArtist
+          .putIfAbsent(track.artist.toLowerCase(), () => <MusicTrack>[])
+          .add(track);
+    }
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: _mostPlayedArtists.map((artist) {
+        final artistTracks =
+            tracksByArtist[artist.artist.toLowerCase()] ?? const <MusicTrack>[];
+        return ActionChip(
+          avatar: Icon(Icons.graphic_eq_rounded, size: 16),
+          label: Text('${artist.artist} · ${artist.count} plays'),
+          onPressed: artistTracks.isEmpty
+              ? null
+              : () => _play(artist.track, playlist: artistTracks),
+          backgroundColor: C.surface,
+          side: BorderSide(color: C.border),
+          labelStyle: TextStyle(color: C.text, fontSize: 11),
+        );
+      }).toList(),
     );
   }
 

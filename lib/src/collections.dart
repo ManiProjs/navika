@@ -328,7 +328,7 @@ extension _CollectionMethods on _HomeScreenState {
 
   Future<void> _logout() async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.remove(_credentialsKey);
+    await _deleteCredentialJson(preferences);
     await _player.stop();
 
     if (!mounted) return;

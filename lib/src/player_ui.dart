@@ -55,7 +55,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                           style: TextStyle(
                             color: _artworkAccentColor ?? C.lime,
                             fontFamily: 'DMSansBold',
-                            fontSize: 9,
+                            fontSize: 10,
                             letterSpacing: 1.3,
                           ),
                         ),
@@ -83,6 +83,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                       ),
                     ),
                     IconButton(
+                      tooltip: 'More player options',
                       onPressed: () => _showTrackMenu(track),
                       icon: Icon(Icons.more_horiz_rounded),
                     ),
@@ -135,7 +136,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                                         'NOW PLAYING',
                                         style: TextStyle(
                                           color: C.muted,
-                                          fontSize: 9,
+                                          fontSize: 10,
                                           letterSpacing: 1.3,
                                           fontFamily: 'DMSansBold',
                                         ),
@@ -171,6 +172,10 @@ extension _PlayerUiMethods on _HomeScreenState {
                                             ),
                                           ),
                                           IconButton(
+                                            tooltip:
+                                                _favorites.contains(track.id)
+                                                ? 'Remove from favorites'
+                                                : 'Add to favorites',
                                             onPressed: () =>
                                                 _toggleFavorite(track),
                                             icon: Icon(
@@ -202,6 +207,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                                             MainAxisAlignment.center,
                                         children: [
                                           IconButton(
+                                            tooltip: 'Shuffle',
                                             onPressed: _toggleShuffle,
                                             icon: Icon(
                                               Icons.shuffle_rounded,
@@ -211,6 +217,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                                             ),
                                           ),
                                           IconButton(
+                                            tooltip: 'Previous track',
                                             onPressed: () => _skip(-1),
                                             icon: Icon(
                                               Icons.skip_previous_rounded,
@@ -218,6 +225,9 @@ extension _PlayerUiMethods on _HomeScreenState {
                                             ),
                                           ),
                                           IconButton(
+                                            tooltip: _player.playing
+                                                ? 'Pause'
+                                                : 'Play',
                                             onPressed: _togglePlayback,
                                             icon: Icon(
                                               _player.playing
@@ -230,6 +240,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                                             ),
                                           ),
                                           IconButton(
+                                            tooltip: 'Next track',
                                             onPressed: () => _skip(1),
                                             icon: Icon(
                                               Icons.skip_next_rounded,
@@ -237,10 +248,15 @@ extension _PlayerUiMethods on _HomeScreenState {
                                             ),
                                           ),
                                           IconButton(
+                                            tooltip: _repeatOne
+                                                ? 'Repeat one'
+                                                : _repeatAll
+                                                ? 'Repeat all'
+                                                : 'Repeat off',
                                             onPressed: _cycleRepeatMode,
                                             icon: Icon(
                                               Icons.repeat_rounded,
-                                              color: _repeatAll
+                                              color: (_repeatAll || _repeatOne)
                                                   ? C.lime
                                                   : C.muted,
                                             ),
@@ -288,7 +304,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                                         'NOW PLAYING',
                                         style: TextStyle(
                                           color: C.muted,
-                                          fontSize: 9,
+                                          fontSize: 10,
                                           letterSpacing: 1.1,
                                         ),
                                       ),
@@ -356,7 +372,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                                         'NEXT IN QUEUE',
                                         style: TextStyle(
                                           color: C.muted,
-                                          fontSize: 9,
+                                          fontSize: 10,
                                           letterSpacing: 1.1,
                                         ),
                                       ),
@@ -509,19 +525,26 @@ extension _PlayerUiMethods on _HomeScreenState {
                                               40,
                                             ),
                                             onTap: _togglePlayback,
-                                            child: Container(
-                                              width: 50,
-                                              height: 50,
-                                              decoration: BoxDecoration(
-                                                color: C.lime,
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: Icon(
-                                                _player.playing
-                                                    ? Icons.pause_rounded
-                                                    : Icons.play_arrow_rounded,
-                                                color: C.black,
-                                                size: 25,
+                                            child: Semantics(
+                                              button: true,
+                                              label: _player.playing
+                                                  ? 'Pause'
+                                                  : 'Play',
+                                              child: Container(
+                                                width: 50,
+                                                height: 50,
+                                                decoration: BoxDecoration(
+                                                  color: C.lime,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                child: Icon(
+                                                  _player.playing
+                                                      ? Icons.pause_rounded
+                                                      : Icons
+                                                            .play_arrow_rounded,
+                                                  color: C.black,
+                                                  size: 25,
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -911,6 +934,9 @@ extension _PlayerUiMethods on _HomeScreenState {
                                         ],
                                         SizedBox(height: 10),
                                         IconButton(
+                                          tooltip: _favorites.contains(track.id)
+                                              ? 'Remove from favorites'
+                                              : 'Add to favorites',
                                           alignment: Alignment.center,
                                           padding: EdgeInsets.zero,
                                           onPressed: () =>
@@ -939,6 +965,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 IconButton(
+                                  tooltip: 'Shuffle',
                                   visualDensity: VisualDensity.compact,
                                   constraints: BoxConstraints(
                                     minWidth: 40,
@@ -952,6 +979,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                                   ),
                                 ),
                                 IconButton(
+                                  tooltip: 'Previous track',
                                   visualDensity: VisualDensity.compact,
                                   constraints: BoxConstraints(
                                     minWidth: 40,
@@ -966,23 +994,28 @@ extension _PlayerUiMethods on _HomeScreenState {
                                 InkWell(
                                   borderRadius: BorderRadius.circular(40),
                                   onTap: _togglePlayback,
-                                  child: Container(
-                                    width: 52,
-                                    height: 52,
-                                    decoration: BoxDecoration(
-                                      color: C.lime,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Icon(
-                                      _player.playing
-                                          ? Icons.pause_rounded
-                                          : Icons.play_arrow_rounded,
-                                      color: C.black,
-                                      size: 26,
+                                  child: Semantics(
+                                    button: true,
+                                    label: _player.playing ? 'Pause' : 'Play',
+                                    child: Container(
+                                      width: 52,
+                                      height: 52,
+                                      decoration: BoxDecoration(
+                                        color: C.lime,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        _player.playing
+                                            ? Icons.pause_rounded
+                                            : Icons.play_arrow_rounded,
+                                        color: C.black,
+                                        size: 26,
+                                      ),
                                     ),
                                   ),
                                 ),
                                 IconButton(
+                                  tooltip: 'Next track',
                                   visualDensity: VisualDensity.compact,
                                   constraints: BoxConstraints(
                                     minWidth: 40,
@@ -992,6 +1025,11 @@ extension _PlayerUiMethods on _HomeScreenState {
                                   icon: Icon(Icons.skip_next_rounded, size: 27),
                                 ),
                                 IconButton(
+                                  tooltip: _repeatOne
+                                      ? 'Repeat one'
+                                      : _repeatAll
+                                      ? 'Repeat all'
+                                      : 'Repeat off',
                                   visualDensity: VisualDensity.compact,
                                   constraints: BoxConstraints(
                                     minWidth: 40,

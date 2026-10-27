@@ -64,6 +64,7 @@ extension _MiniPlayerMethods on _HomeScreenState {
                       ),
                     ),
                     IconButton(
+                      tooltip: 'Play or pause',
                       onPressed: _togglePlayback,
                       icon: ValueListenableBuilder<bool>(
                         valueListenable: _isPlaying,
@@ -76,6 +77,7 @@ extension _MiniPlayerMethods on _HomeScreenState {
                       ),
                     ),
                     IconButton(
+                      tooltip: 'Next track',
                       onPressed: () => _skip(1),
                       icon: Icon(Icons.skip_next_rounded),
                     ),
@@ -145,57 +147,62 @@ extension _MiniPlayerMethods on _HomeScreenState {
                       (_tab == AppTab.favorites || _tab == AppTab.stats));
 
               return Expanded(
-                child: InkWell(
-                  onTap: () => _selectTab(tab),
-                  child: SizedBox(
-                    height: 70,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            AnimatedScale(
-                              scale: active ? 1 : 0.96,
+                child: Semantics(
+                  button: true,
+                  selected: active,
+                  label: tab.label,
+                  child: InkWell(
+                    onTap: () => _selectTab(tab),
+                    child: SizedBox(
+                      height: 70,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              AnimatedScale(
+                                scale: active ? 1 : 0.96,
+                                duration: _reduceMotion
+                                    ? Duration.zero
+                                    : Duration(milliseconds: 110),
+                                curve: Curves.easeOut,
+                                child: Icon(
+                                  tab.icon,
+                                  size: 22,
+                                  color: active ? C.lime : C.muted,
+                                ),
+                              ),
+                              SizedBox(height: 3),
+                              Text(
+                                tab.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontFamily: 'DMSansMedium',
+                                  fontSize: 10,
+                                  color: active ? C.lime : C.muted,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Positioned(
+                            bottom: 0,
+                            child: AnimatedContainer(
+                              width: active ? 18 : 0,
+                              height: 2,
                               duration: _reduceMotion
                                   ? Duration.zero
-                                  : Duration(milliseconds: 110),
-                              curve: Curves.easeOut,
-                              child: Icon(
-                                tab.icon,
-                                size: 22,
-                                color: active ? C.lime : C.muted,
+                                  : Duration(milliseconds: 120),
+                              curve: Curves.easeOutCubic,
+                              decoration: BoxDecoration(
+                                color: C.lime,
+                                borderRadius: BorderRadius.circular(1),
                               ),
-                            ),
-                            SizedBox(height: 3),
-                            Text(
-                              tab.label,
-                              maxLines: 1,
-                              overflow: TextOverflow.clip,
-                              style: TextStyle(
-                                fontFamily: 'DMSansMedium',
-                                fontSize: 9,
-                                color: active ? C.lime : C.muted,
-                              ),
-                            ),
-                          ],
-                        ),
-                        Positioned(
-                          bottom: 0,
-                          child: AnimatedContainer(
-                            width: active ? 18 : 0,
-                            height: 2,
-                            duration: _reduceMotion
-                                ? Duration.zero
-                                : Duration(milliseconds: 120),
-                            curve: Curves.easeOutCubic,
-                            decoration: BoxDecoration(
-                              color: C.lime,
-                              borderRadius: BorderRadius.circular(1),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),

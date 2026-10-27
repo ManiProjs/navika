@@ -1,3 +1,23 @@
+# Navika v0.1.1
+
+This maintenance release improves playback reliability, library performance, accessibility, and credential security.
+
+## What's changed
+
+- **More reliable playback:** prevent superseded playback requests from publishing stale state and keep Flow's generated queue stable when advancing to the next track.
+- **Faster library and Flow updates:** reduce repeated library scans and recommendation scoring work, and avoid building very large playlist views until requested.
+- **Improved history and recommendations:** refresh Flow after listening history is cleared and invalidate cached recommendations when their inputs change.
+- **Safer credentials:** use Android Keystore on Android, the Secret Service keyring on Linux, and Windows DPAPI on Windows. Existing plaintext credentials are migrated where supported; secure-storage failures do not silently fall back to plaintext.
+- **HTTPS-only remote servers:** require HTTPS for Navidrome connections and disable cleartext network traffic on Android.
+- **Accessibility and UI polish:** add accessible labels and tooltips to key controls, improve login-field autofill and keyboard behavior, preserve text scaling, and improve repeat-mode indicators.
+- **Apple credential notice:** show the requested plain-text credential warning on iOS and macOS.
+
+## Downloads
+
+Release assets are attached to the GitHub v0.1.1 release.
+
+---
+
 # Navika v0.1.0
 
 Navika's first public release: a focused, cross-platform music player for your Navidrome library and local music files.
