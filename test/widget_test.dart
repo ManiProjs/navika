@@ -21,6 +21,7 @@ void main() {
       localPath: '/music/track.flac',
       localArtworkPath: '/app/artwork/track.img',
       localMetadataRead: true,
+      localModifiedMillis: 1720000000000,
     );
 
     final restored = MusicTrack.fromJson(track.toJson());
@@ -29,6 +30,7 @@ void main() {
     expect(restored.localPath, '/music/track.flac');
     expect(restored.localArtworkPath, '/app/artwork/track.img');
     expect(restored.localMetadataRead, isTrue);
+    expect(restored.localModifiedMillis, 1720000000000);
     expect(restored.title, 'Track');
     expect(restored.artist, 'Embedded Artist');
     expect(restored.album, 'Embedded Album');

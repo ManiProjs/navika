@@ -287,33 +287,42 @@ extension _LibraryPageMethods on _HomeScreenState {
   }
 
   Widget _favoritesPage() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Your favorites',
-          style: TextStyle(
-            fontFamily: 'SyneBold',
-            fontSize: 35,
-            letterSpacing: -1.5,
-          ),
-        ),
-        SizedBox(height: 8),
-        Text(
-          'The tracks you saved with a heart.',
-          style: TextStyle(color: C.muted, fontSize: 13),
-        ),
-        SizedBox(height: 22),
-        if (_favoriteTracks.isEmpty)
-          _emptyState(
-            'No favorites yet',
-            'Play a track and tap the heart in the full-screen player to save it here.',
-          )
-        else
-          ..._favoriteTracks.asMap().entries.map(
-            (entry) => _trackRow(entry.value, entry.key),
-          ),
-      ],
+    final favorites = _favoriteTracks;
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(22, 28, 22, 30),
+      itemCount: favorites.isEmpty ? 4 : favorites.length + 3,
+      itemBuilder: (context, index) {
+        switch (index) {
+          case 0:
+            return const Text(
+              'Your favorites',
+              style: TextStyle(
+                fontFamily: 'SyneBold',
+                fontSize: 35,
+                letterSpacing: -1.5,
+              ),
+            );
+          case 1:
+            return Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'The tracks you saved with a heart.',
+                style: TextStyle(color: C.muted, fontSize: 13),
+              ),
+            );
+          case 2:
+            return const SizedBox(height: 22);
+          default:
+            if (favorites.isEmpty) {
+              return _emptyState(
+                'No favorites yet',
+                'Play a track and tap the heart in the full-screen player to save it here.',
+              );
+            }
+            final trackIndex = index - 3;
+            return _trackRow(favorites[trackIndex], trackIndex);
+        }
+      },
     );
   }
 

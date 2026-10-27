@@ -231,7 +231,7 @@ class _FlowSliderState extends State<_FlowSlider> {
                       ),
                     ),
                     AnimatedFractionallySizedBox(
-                      duration: Duration(milliseconds: 90),
+                      duration: Duration(milliseconds: 60),
                       curve: Curves.easeOutCubic,
                       widthFactor: _value,
                       alignment: Alignment.centerLeft,
@@ -267,7 +267,7 @@ class _FlowSliderState extends State<_FlowSlider> {
                     AnimatedPositioned(
                       left: (width * _value - 7).clamp(-1.0, width - 13),
                       top: -5,
-                      duration: Duration(milliseconds: 90),
+                      duration: Duration(milliseconds: 60),
                       curve: Curves.easeOutCubic,
                       child: Container(
                         width: 14,

@@ -135,8 +135,22 @@ extension _SharedWidgetMethods on _HomeScreenState {
             ? Image.file(
                 File(localArtworkPath),
                 fit: BoxFit.cover,
+                gaplessPlayback: true,
                 cacheWidth: pixelSize,
                 cacheHeight: pixelSize,
+                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                  if (wasSynchronouslyLoaded || frame != null) return child;
+                  return ColoredBox(
+                    color: color,
+                    child: Center(
+                      child: Icon(
+                        Icons.music_note_rounded,
+                        color: C.lime,
+                        size: 30,
+                      ),
+                    ),
+                  );
+                },
                 errorBuilder: (context, error, stackTrace) => Container(
                   color: color,
                   alignment: Alignment.center,
@@ -177,8 +191,22 @@ extension _SharedWidgetMethods on _HomeScreenState {
             : Image.network(
                 url,
                 fit: BoxFit.cover,
+                gaplessPlayback: true,
                 cacheWidth: pixelSize,
                 cacheHeight: pixelSize,
+                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                  if (wasSynchronouslyLoaded || frame != null) return child;
+                  return ColoredBox(
+                    color: color,
+                    child: Center(
+                      child: Icon(
+                        Icons.music_note_rounded,
+                        color: C.lime,
+                        size: 30,
+                      ),
+                    ),
+                  );
+                },
                 errorBuilder: (context, error, stackTrace) => Container(
                   color: color,
                   alignment: Alignment.center,
@@ -335,49 +363,7 @@ extension _SharedWidgetMethods on _HomeScreenState {
   }
 
   Widget _visualizer() {
-    return ValueListenableBuilder<Duration>(
-      valueListenable: _position,
-      builder: (context, _, _) => RepaintBoundary(child: _visualizerBody()),
-    );
-  }
-
-  Widget _visualizerBody() {
-    final phase = _position.value.inMilliseconds / 180;
-    return Container(
-      height: 54,
-      width: double.infinity,
-      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: C.black.withValues(alpha: .35),
-        border: Border.all(color: C.border.withValues(alpha: .7)),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: List.generate(24, (index) {
-          final wave = (math.sin(phase + index * .68) + 1) / 2;
-          final envelope = .25 + .75 * math.sin((index + 1) * math.pi / 25);
-          final height = _player.playing
-              ? 5 + wave * envelope * 32
-              : 5 + envelope * 7;
-          return Expanded(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 1.2),
-              child: AnimatedContainer(
-                duration: Duration(milliseconds: 130),
-                height: height,
-                decoration: BoxDecoration(
-                  color: _player.playing
-                      ? C.lime.withValues(alpha: .55 + wave * .45)
-                      : C.muted.withValues(alpha: .45),
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              ),
-            ),
-          );
-        }),
-      ),
-    );
+    return _Visualizer(player: _player, position: _position);
   }
 
   Widget _playbackProgress(double duration) {
@@ -454,7 +440,7 @@ extension _SharedWidgetMethods on _HomeScreenState {
                             // an animation that is still in flight.
                             duration: _reduceMotion
                                 ? Duration.zero
-                                : Duration(milliseconds: _seeking ? 45 : 70),
+                                : Duration(milliseconds: _seeking ? 30 : 45),
                             curve: Curves.easeOutCubic,
                             widthFactor: progress,
                             child: Stack(
@@ -482,7 +468,7 @@ extension _SharedWidgetMethods on _HomeScreenState {
                   left: thumbLeft,
                   duration: _reduceMotion
                       ? Duration.zero
-                      : Duration(milliseconds: _seeking ? 45 : 70),
+                      : Duration(milliseconds: _seeking ? 30 : 45),
                   curve: Curves.easeOutCubic,
                   child: Container(
                     width: thumbSize,
@@ -540,5 +526,84 @@ extension _SharedWidgetMethods on _HomeScreenState {
     final minutes = seconds ~/ 60;
     final remaining = seconds.floor() % 60;
     return '$minutes:${remaining.toString().padLeft(2, '0')}';
+  }
+}
+
+class _Visualizer extends StatefulWidget {
+  const _Visualizer({required this.player, required this.position});
+
+  final AudioPlayer player;
+  final ValueListenable<Duration> position;
+
+  @override
+  State<_Visualizer> createState() => _VisualizerState();
+}
+
+class _VisualizerState extends State<_Visualizer> {
+  late bool _playing;
+  StreamSubscription<PlayerState>? _subscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _playing = widget.player.playing;
+    widget.position.addListener(_onPosition);
+    _subscription = widget.player.playerStateStream.listen((state) {
+      if (!mounted || _playing == state.playing) return;
+      setState(() => _playing = state.playing);
+    });
+  }
+
+  void _onPosition() {
+    if (_playing && mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    widget.position.removeListener(_onPosition);
+    unawaited(_subscription?.cancel());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final phase = widget.position.value.inMilliseconds / 180;
+    return RepaintBoundary(
+      child: Container(
+        height: 54,
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: C.black.withValues(alpha: .35),
+          border: Border.all(color: C.border.withValues(alpha: .7)),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: List.generate(24, (index) {
+            final wave = (math.sin(phase + index * .68) + 1) / 2;
+            final envelope = .25 + .75 * math.sin((index + 1) * math.pi / 25);
+            final height = _playing
+                ? 5 + wave * envelope * 32
+                : 5 + envelope * 7;
+            return Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 1.2),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 70),
+                  height: height,
+                  decoration: BoxDecoration(
+                    color: _playing
+                        ? C.lime.withValues(alpha: .55 + wave * .45)
+                        : C.muted.withValues(alpha: .45),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
   }
 }

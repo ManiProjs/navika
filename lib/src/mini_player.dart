@@ -65,11 +65,14 @@ extension _MiniPlayerMethods on _HomeScreenState {
                     ),
                     IconButton(
                       onPressed: _togglePlayback,
-                      icon: Icon(
-                        _player.playing
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
-                        color: C.lime,
+                      icon: ValueListenableBuilder<bool>(
+                        valueListenable: _isPlaying,
+                        builder: (context, playing, _) => Icon(
+                          playing
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          color: C.lime,
+                        ),
                       ),
                     ),
                     IconButton(
@@ -156,7 +159,7 @@ extension _MiniPlayerMethods on _HomeScreenState {
                               scale: active ? 1 : 0.96,
                               duration: _reduceMotion
                                   ? Duration.zero
-                                  : Duration(milliseconds: 160),
+                                  : Duration(milliseconds: 110),
                               curve: Curves.easeOut,
                               child: Icon(
                                 tab.icon,
@@ -184,7 +187,7 @@ extension _MiniPlayerMethods on _HomeScreenState {
                             height: 2,
                             duration: _reduceMotion
                                 ? Duration.zero
-                                : Duration(milliseconds: 180),
+                                : Duration(milliseconds: 120),
                             curve: Curves.easeOutCubic,
                             decoration: BoxDecoration(
                               color: C.lime,

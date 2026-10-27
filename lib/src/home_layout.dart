@@ -232,9 +232,10 @@ extension _HomeLayoutMethods on _HomeScreenState {
     if (_loading && !_connected) {
       return Center(child: CircularProgressIndicator(color: C.lime));
     }
+    final lazyListPage = _tab == AppTab.search || _tab == AppTab.favorites;
 
     return AnimatedSwitcher(
-      duration: _reduceMotion ? Duration.zero : Duration(milliseconds: 220),
+      duration: _reduceMotion ? Duration.zero : Duration(milliseconds: 150),
       transitionBuilder: (child, animation) {
         final slide = Tween<Offset>(begin: Offset(0, 0.012), end: Offset.zero)
             .animate(
@@ -247,22 +248,35 @@ extension _HomeLayoutMethods on _HomeScreenState {
       },
       child: KeyedSubtree(
         key: ValueKey(_tab),
-        child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(22, 28, 22, 30),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: 1280),
-              child: switch (_tab) {
-                AppTab.home => _homePage(),
-                AppTab.search => _searchPage(),
-                AppTab.library => _libraryPage(),
-                AppTab.playlists => _playlistsPage(),
-                AppTab.favorites => _favoritesPage(),
-                AppTab.stats => _statsPage(),
-              },
-            ),
-          ),
-        ),
+        child: lazyListPage
+            ? SizedBox.expand(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1280),
+                    child: switch (_tab) {
+                      AppTab.search => _searchPage(),
+                      AppTab.favorites => _favoritesPage(),
+                      _ => const SizedBox.shrink(),
+                    },
+                  ),
+                ),
+              )
+            : SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(22, 28, 22, 30),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: 1280),
+                    child: switch (_tab) {
+                      AppTab.home => _homePage(),
+                      AppTab.search => _searchPage(),
+                      AppTab.library => _libraryPage(),
+                      AppTab.playlists => _playlistsPage(),
+                      AppTab.favorites => _favoritesPage(),
+                      AppTab.stats => _statsPage(),
+                    },
+                  ),
+                ),
+              ),
       ),
     );
   }

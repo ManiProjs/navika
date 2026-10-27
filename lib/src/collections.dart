@@ -311,6 +311,9 @@ extension _CollectionMethods on _HomeScreenState {
   }
 
   Future<void> _toggleFavorite(MusicTrack track) async {
+    _flowQueueDirty = true;
+    _cachedFavoriteTracks = null;
+    _invalidateRecommendationCaches();
     _updateState(() {
       if (_favorites.contains(track.id)) {
         _favorites.remove(track.id);
@@ -320,7 +323,7 @@ extension _CollectionMethods on _HomeScreenState {
     });
 
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setStringList(_favoritesKey, _favorites);
+    await preferences.setStringList(_favoritesKey, _favorites.toList());
   }
 
   Future<void> _logout() async {
@@ -339,7 +342,9 @@ extension _CollectionMethods on _HomeScreenState {
       _search.clear();
       _queue = [];
       _current = null;
+      _currentTrackNotifier.value = null;
       _queueIndex = 0;
+      _queueIndexNotifier.value = 0;
       _connected = false;
       _libraryLoaded = false;
       _libraryError = '';

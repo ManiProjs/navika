@@ -1,7 +1,16 @@
 part of '../main.dart';
 
 extension _DiscoveryMethods on _HomeScreenState {
+  void _invalidateRecommendationCaches() {
+    _cachedRecommendedTracks = null;
+    _cachedDiscoveryTracks = null;
+    _cachedFavoriteArtistTracks = null;
+    _cachedRecentlyPlayedTracks = null;
+  }
+
   List<MusicTrack> _discoveryTracks() {
+    final cached = _cachedDiscoveryTracks;
+    if (cached != null) return cached;
     final playedRecently = _history
         .skip(math.max(0, _history.length - 12))
         .map((event) => event.id)
@@ -13,17 +22,24 @@ extension _DiscoveryMethods on _HomeScreenState {
               !_favorites.contains(track.id),
         )
         .toList();
-    if (picks.isNotEmpty) return picks;
-    return _modeTracks
+    if (picks.isNotEmpty) {
+      _cachedDiscoveryTracks = picks;
+      return picks;
+    }
+    final fallback = _modeTracks
         .where(
           (track) =>
               track.id != _current?.id &&
               !_dismissedRecommendations.contains(track.id),
         )
         .toList();
+    _cachedDiscoveryTracks = fallback;
+    return fallback;
   }
 
   List<MusicTrack> _tracksFromFavoriteArtists() {
+    final cached = _cachedFavoriteArtistTracks;
+    if (cached != null) return cached;
     final artists = <String, int>{};
     for (final event in _history) {
       artists.update(
@@ -52,16 +68,22 @@ extension _DiscoveryMethods on _HomeScreenState {
               !playedRecently.contains(track.id),
         )
         .toList();
-    return picks.isNotEmpty ? picks : _recommended();
+    final result = picks.isNotEmpty ? picks : _recommended();
+    _cachedFavoriteArtistTracks = result;
+    return result;
   }
 
   List<MusicTrack> _recentlyPlayedTracks() {
+    final cached = _cachedRecentlyPlayedTracks;
+    if (cached != null) return cached;
     final seen = <String>{};
-    return _history.reversed
+    final tracks = _history.reversed
         .map((event) => _tracksById[event.id])
         .whereType<MusicTrack>()
         .where((track) => seen.add(track.id))
         .toList();
+    _cachedRecentlyPlayedTracks = tracks;
+    return tracks;
   }
 
   Widget _recommendationShelf(
@@ -139,79 +161,95 @@ extension _DiscoveryMethods on _HomeScreenState {
   }
 
   Widget _searchPage() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Find your music',
-          style: TextStyle(
-            fontFamily: 'SyneBold',
-            fontSize: 35,
-            letterSpacing: -1.5,
-          ),
+    final results = _searchResults.take(30).toList(growable: false);
+    final hasResults =
+        !_searching &&
+        _searchError.isEmpty &&
+        _search.text.trim().isNotEmpty &&
+        results.isNotEmpty;
+    final Widget status;
+    if (!_connected && _localTracks.isEmpty && _searchResults.isEmpty) {
+      status = _emptyState(
+        'Add music to search',
+        'Import audio files or a music folder to search your local library.',
+        action: 'Add music',
+        onTap: _importLocalMusic,
+      );
+    } else if (_searchError.isNotEmpty) {
+      status = _emptyState(
+        'Search unavailable',
+        _searchError,
+        action: 'Retry search',
+        onTap: () => _runSearch(_search.text),
+      );
+    } else if (_searching) {
+      status = Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: CircularProgressIndicator(color: C.lime),
         ),
-        SizedBox(height: 8),
-        Text(
-          'Search your tracks, artists, and albums.',
-          style: TextStyle(color: C.muted, fontSize: 13),
-        ),
-        SizedBox(height: 22),
-        TextField(
-          controller: _search,
-          onChanged: _runSearch,
-          decoration: InputDecoration(
-            hintText: 'Search your library',
-            prefixIcon: Icon(Icons.search_rounded, color: C.muted),
-            suffixIcon: _search.text.isEmpty
-                ? null
-                : IconButton(
-                    onPressed: () {
-                      _search.clear();
-                      _runSearch('');
-                    },
-                    icon: Icon(Icons.close_rounded, color: C.muted),
-                  ),
-          ),
-        ),
-        SizedBox(height: 20),
-        if (!_connected && _localTracks.isEmpty && _searchResults.isEmpty)
-          _emptyState(
-            'Add music to search',
-            'Import audio files or a music folder to search your local library.',
-            action: 'Add music',
-            onTap: _importLocalMusic,
-          )
-        else if (_searchError.isNotEmpty)
-          _emptyState(
-            'Search unavailable',
-            _searchError,
-            action: 'Retry search',
-            onTap: () => _runSearch(_search.text),
-          )
-        else if (_searching)
-          Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: CircularProgressIndicator(color: C.lime),
-            ),
-          )
-        else if (_search.text.trim().isEmpty)
-          _emptyState(
-            'Start typing to search',
-            _connected
-                ? 'Search your Navidrome library.'
-                : 'Search your imported local music.',
-          )
-        else if (_searchResults.isEmpty)
-          _emptyState('No results found', 'Try a different search.')
-        else
-          ..._searchResults
-              .take(30)
-              .toList()
-              .asMap()
-              .entries
-              .map((entry) => _trackRow(entry.value, entry.key)),
-      ],
+      );
+    } else if (_search.text.trim().isEmpty) {
+      status = _emptyState(
+        'Start typing to search',
+        _connected
+            ? 'Search your Navidrome library.'
+            : 'Search your imported local music.',
+      );
+    } else {
+      status = _emptyState('No results found', 'Try a different search.');
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(22, 28, 22, 30),
+      itemCount: 5 + (hasResults ? results.length : 1),
+      itemBuilder: (context, index) {
+        switch (index) {
+          case 0:
+            return const Text(
+              'Find your music',
+              style: TextStyle(
+                fontFamily: 'SyneBold',
+                fontSize: 35,
+                letterSpacing: -1.5,
+              ),
+            );
+          case 1:
+            return Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Search your tracks, artists, and albums.',
+                style: TextStyle(color: C.muted, fontSize: 13),
+              ),
+            );
+          case 2:
+            return const SizedBox(height: 22);
+          case 3:
+            return TextField(
+              controller: _search,
+              onChanged: _runSearch,
+              decoration: InputDecoration(
+                hintText: 'Search your library',
+                prefixIcon: Icon(Icons.search_rounded, color: C.muted),
+                suffixIcon: _search.text.isEmpty
+                    ? null
+                    : IconButton(
+                        onPressed: () {
+                          _search.clear();
+                          _runSearch('');
+                        },
+                        icon: Icon(Icons.close_rounded, color: C.muted),
+                      ),
+              ),
+            );
+          case 4:
+            return const SizedBox(height: 20);
+          default:
+            if (!hasResults) return status;
+            final resultIndex = index - 5;
+            return _trackRow(results[resultIndex], resultIndex);
+        }
+      },
     );
   }
 

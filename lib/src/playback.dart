@@ -58,6 +58,9 @@ extension _PlaybackMethods on _HomeScreenState {
         _queue = finalQueue;
         _queueIndex = index;
         _current = track;
+        _invalidateRecommendationCaches();
+        _currentTrackNotifier.value = track;
+        _queueIndexNotifier.value = index;
         _artworkAccentColor = null;
         _showPlayer = !_showFlow;
         _showUpNext = false;
@@ -73,6 +76,19 @@ extension _PlaybackMethods on _HomeScreenState {
         playedAt: DateTime.now().millisecondsSinceEpoch,
       );
       _history = [..._history, event].takeLast(200).toList();
+      _invalidateRecommendationCaches();
+      _flowQueueDirty = true;
+      _scheduleHistorySave();
+      if (mounted && _flowActive) _refreshFlowQueue();
+    } catch (error) {
+      if (!mounted) return;
+      _updateState(() => _error = _describePlaybackError(error));
+    }
+  }
+
+  void _scheduleHistorySave() {
+    _historySaveTimer?.cancel();
+    _historySaveTimer = Timer(const Duration(milliseconds: 700), () async {
       try {
         final preferences = await SharedPreferences.getInstance();
         await preferences.setString(
@@ -87,11 +103,7 @@ extension _PlaybackMethods on _HomeScreenState {
           );
         }
       }
-      if (mounted && _flowActive) _refreshFlowQueue();
-    } catch (error) {
-      if (!mounted) return;
-      _updateState(() => _error = _describePlaybackError(error));
-    }
+    });
   }
 
   Future<void> _saveQueue() async {
@@ -111,6 +123,7 @@ extension _PlaybackMethods on _HomeScreenState {
     _updateState(() {
       _queue.removeAt(index);
       if (index < _queueIndex) _queueIndex--;
+      _queueIndexNotifier.value = _queueIndex;
     });
     unawaited(_saveQueue());
   }
@@ -138,6 +151,7 @@ extension _PlaybackMethods on _HomeScreenState {
         _queue.clear();
         _queueIndex = 0;
       }
+      _queueIndexNotifier.value = _queueIndex;
     });
     await _saveQueue();
   }
@@ -215,6 +229,8 @@ extension _PlaybackMethods on _HomeScreenState {
   }
 
   Future<void> _dismissRecommendation(MusicTrack track) async {
+    _flowQueueDirty = true;
+    _invalidateRecommendationCaches();
     _updateState(() => _dismissedRecommendations.add(track.id));
     final preferences = await SharedPreferences.getInstance();
     await preferences.setStringList(

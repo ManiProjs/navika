@@ -166,6 +166,7 @@ extension _FlowUiMethods on _HomeScreenState {
                                     () => _flowFamiliarity = value,
                                   ),
                                   onChangeEnd: () {
+                                    _flowQueueDirty = true;
                                     if (_flowActive) _refreshFlowQueue();
                                   },
                                 ),
@@ -230,6 +231,7 @@ extension _FlowUiMethods on _HomeScreenState {
                                   onChanged: (value) =>
                                       _updateState(() => _flowVariety = value),
                                   onChangeEnd: () {
+                                    _flowQueueDirty = true;
                                     if (_flowActive) _refreshFlowQueue();
                                   },
                                 ),
@@ -592,7 +594,7 @@ extension _FlowUiMethods on _HomeScreenState {
     return TweenAnimationBuilder<double>(
       key: ValueKey('flow-page-$page'),
       tween: Tween(begin: 0, end: 1),
-      duration: _reduceMotion ? Duration.zero : Duration(milliseconds: 240),
+      duration: _reduceMotion ? Duration.zero : Duration(milliseconds: 160),
       curve: Curves.easeOutCubic,
       child: child,
       builder: (context, progress, child) => Opacity(

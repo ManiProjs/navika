@@ -4,7 +4,7 @@ extension _SettingsMethods on _HomeScreenState {
   Widget _settingsOverlay({required bool isMobile}) {
     final duration = _reduceMotion
         ? Duration.zero
-        : Duration(milliseconds: 280);
+        : Duration(milliseconds: 170);
     return Positioned.fill(
       child: IgnorePointer(
         ignoring: !_showSettings,
@@ -337,6 +337,18 @@ extension _SettingsMethods on _HomeScreenState {
                                         ),
                                       ),
                                     ),
+                                    IconButton(
+                                      tooltip: 'Rescan music folders',
+                                      onPressed: _localFolders.isEmpty
+                                          ? null
+                                          : () => _scanLocalFolders(
+                                              showFeedback: true,
+                                            ),
+                                      icon: const Icon(
+                                        Icons.refresh_rounded,
+                                        size: 18,
+                                      ),
+                                    ),
                                     TextButton.icon(
                                       onPressed: _importLocalFolder,
                                       icon: Icon(
@@ -352,7 +364,7 @@ extension _SettingsMethods on _HomeScreenState {
                                 Padding(
                                   padding: EdgeInsets.only(bottom: 10),
                                   child: Text(
-                                    'No watched folders. Add one to keep local music updated automatically.',
+                                    'No watched folders. Add one to scan local music when you choose.',
                                     style: TextStyle(
                                       color: C.muted,
                                       fontSize: 10,

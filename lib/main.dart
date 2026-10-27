@@ -62,22 +62,26 @@ abstract final class C {
   static bool get light => _themeMode.value == NavikaTheme.light;
   static bool get amoled => _themeMode.value == NavikaTheme.amoled;
   static Color get bg => light
-      ? Color(0xFFF6F6F3)
-      : (amoled ? Color(0xFF000000) : Color(0xFF100F0D));
+      ? const Color(0xFFF6F6F3)
+      : (amoled ? const Color(0xFF000000) : const Color(0xFF100F0D));
   static Color get surface => light
-      ? Color(0xFFFFFFFF)
-      : (amoled ? Color(0xFF090909) : Color(0xFF1B1916));
+      ? const Color(0xFFFFFFFF)
+      : (amoled ? const Color(0xFF090909) : const Color(0xFF1B1916));
   static Color get surface2 => light
-      ? Color(0xFFEBEBE6)
-      : (amoled ? Color(0xFF141414) : Color(0xFF24211D));
+      ? const Color(0xFFEBEBE6)
+      : (amoled ? const Color(0xFF141414) : const Color(0xFF24211D));
   static Color get border => light
-      ? Color(0xFFD8D8D0)
-      : (amoled ? Color(0xFF242424) : Color(0xFF302D28));
-  static Color get text => light ? Color(0xFF171713) : Color(0xFFF5F3EC);
-  static Color get muted => light ? Color(0xFF68685F) : Color(0xFFA29D91);
-  static Color get lime => light ? Color(0xFF426600) : Color(0xFFD6FF39);
+      ? const Color(0xFFD8D8D0)
+      : (amoled ? const Color(0xFF242424) : const Color(0xFF302D28));
+  static Color get text =>
+      light ? const Color(0xFF171713) : const Color(0xFFF5F3EC);
+  static Color get muted =>
+      light ? const Color(0xFF68685F) : const Color(0xFFA29D91);
+  static Color get lime =>
+      light ? const Color(0xFF426600) : const Color(0xFFD6FF39);
   static Color get black => light ? const Color(0xFFFFFFFF) : bg;
-  static Color get danger => light ? Color(0xFFB42318) : Color(0xFFFF8585);
+  static Color get danger =>
+      light ? const Color(0xFFB42318) : const Color(0xFFFF8585);
 }
 
 const _credentialsKey = 'navika.navidrome.credentials';
@@ -99,8 +103,6 @@ const _speedKey = 'navika.playback.speed';
 const _localTracksKey = 'navika.local.tracks';
 const _localFoldersKey = 'navika.local.folders';
 const _androidLocalFolders = MethodChannel('app.navika/local_folders');
-const _localFolderRescanInterval = Duration(minutes: 1);
-
 Map<String, Object?> _readEmbeddedMetadata(String path) {
   final metadata = readMetadata(File(path), getImage: true);
   final frontCover = metadata.pictures.where(
@@ -116,6 +118,27 @@ Map<String, Object?> _readEmbeddedMetadata(String path) {
     'duration': metadata.duration?.inSeconds,
     'artwork': picture?.bytes,
   };
+}
+
+Future<List<String>> _listAudioPathsInFolder(String path) async {
+  final directory = Directory(path);
+  if (!await directory.exists()) {
+    throw FileSystemException('Folder no longer exists', path);
+  }
+  final found = <String>[];
+  await for (final entity in directory.list(
+    recursive: true,
+    followLinks: false,
+  )) {
+    if (entity is File &&
+        RegExp(
+          r'\.(mp3|m4a|m4b|m4p|aac|adts|wav|wave|bwf|flac|ogg|oga|opus|aiff|aif|alac|ape|wv|mp4|3gp|mka|webm|wma|mid|midi|caf|amr|ac3|dts|dsf|dff|mpc|tak|audio)$',
+          caseSensitive: false,
+        ).hasMatch(entity.path)) {
+      found.add(entity.path);
+    }
+  }
+  return found;
 }
 
 enum AppTab { home, search, library, playlists, favorites, stats }
@@ -147,9 +170,19 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final AudioPlayer _player = AudioPlayer();
   final ValueNotifier<Duration> _position = ValueNotifier(Duration.zero);
+  final ValueNotifier<bool> _isPlaying = ValueNotifier(false);
+  final ValueNotifier<MusicTrack?> _currentTrackNotifier = ValueNotifier(null);
+  final ValueNotifier<Duration?> _durationNotifier = ValueNotifier(null);
+  final ValueNotifier<int> _queueIndexNotifier = ValueNotifier(0);
+  late final Listenable _playbackListenable = Listenable.merge([
+    _isPlaying,
+    _currentTrackNotifier,
+    _durationNotifier,
+    _queueIndexNotifier,
+  ]);
   final List<StreamSubscription<dynamic>> _playerSubscriptions = [];
   final GlobalKey _progressBarKey = GlobalKey();
   final TextEditingController _search = TextEditingController();
@@ -158,7 +191,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _password = TextEditingController();
   Timer? _searchTimer;
   Timer? _sleepTimer;
-  Timer? _folderScanTimer;
+  Timer? _historySaveTimer;
+  Timer? _settingsUnmountTimer;
+  Timer? _playerUnmountTimer;
   int _searchRequestId = 0;
   final Set<String> _dismissedRecommendations = {};
   final Map<String, int> _tasteArtistFeedback = {};
@@ -181,11 +216,24 @@ class _HomeScreenState extends State<HomeScreen> {
   List<MusicTrack> _searchResults = [];
   List<MusicTrack> _queue = [];
   List<ListeningEvent> _history = [];
-  List<String> _favorites = [];
+  Set<String> _favorites = <String>{};
   Map<String, List<String>> _playlists = {};
 
   MusicTrack? _current;
   int _queueIndex = 0;
+  List<MusicTrack>? _cachedModeTracks;
+  List<MusicTrack>? _cachedModeSource;
+  List<MusicTrack>? _cachedLocalSource;
+  bool? _cachedModeIsLocal;
+  Map<String, MusicTrack>? _cachedTracksById;
+  List<MusicTrack>? _cachedTracksByIdSource;
+  List<MusicTrack>? _cachedFavoriteTracks;
+  List<MusicTrack>? _cachedFlowQueue;
+  List<MusicTrack>? _cachedRecommendedTracks;
+  List<MusicTrack>? _cachedDiscoveryTracks;
+  List<MusicTrack>? _cachedFavoriteArtistTracks;
+  List<MusicTrack>? _cachedRecentlyPlayedTracks;
+  bool _flowQueueDirty = true;
 
   bool _connected = false;
   bool _libraryLoaded = false;
@@ -194,7 +242,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _busy = false;
   bool _showLogin = false;
   bool _showSettings = false;
+  bool _settingsOverlayMounted = false;
   bool _showPlayer = false;
+  bool _playerOverlayMounted = false;
   bool _showFlow = false;
   int _flowPage = 0;
   bool _flowActive = false;
@@ -216,36 +266,82 @@ class _HomeScreenState extends State<HomeScreen> {
   String _libraryError = '';
   String _searchError = '';
 
-  void _updateState(VoidCallback update) => setState(update);
+  void _updateState(VoidCallback update) {
+    final wasSettingsOpen = _showSettings;
+    final wasPlayerOpen = _showPlayer;
+    setState(() {
+      update();
+      if (_showSettings) {
+        _settingsUnmountTimer?.cancel();
+        _settingsOverlayMounted = true;
+      } else if (wasSettingsOpen && _settingsOverlayMounted) {
+        _settingsUnmountTimer?.cancel();
+        _settingsUnmountTimer = Timer(
+          _reduceMotion ? Duration.zero : const Duration(milliseconds: 170),
+          () {
+            if (!mounted || _showSettings) return;
+            setState(() => _settingsOverlayMounted = false);
+          },
+        );
+      }
+      if (_showPlayer) {
+        _playerUnmountTimer?.cancel();
+        _playerOverlayMounted = true;
+      } else if (wasPlayerOpen && _playerOverlayMounted) {
+        _playerUnmountTimer?.cancel();
+        _playerUnmountTimer = Timer(
+          _reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
+          () {
+            if (!mounted || _showPlayer) return;
+            setState(() => _playerOverlayMounted = false);
+          },
+        );
+      }
+    });
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Keep artwork decoding bounded on memory-constrained phones and laptops.
+    PaintingBinding.instance.imageCache
+      ..maximumSize = 300
+      ..maximumSizeBytes = 64 << 20;
     _restore();
 
+    _isPlaying.value = _player.playing;
+    _durationNotifier.value = _player.duration;
     _playerSubscriptions.add(
-      _player.playerStateStream.listen((_) {
-        if (mounted) setState(() {});
+      _player.playerStateStream.listen((state) {
+        _isPlaying.value = state.playing;
       }),
     );
 
     _playerSubscriptions.add(
-      _player.currentIndexStream.listen((_) {
-        if (mounted) setState(() {});
+      _player.currentIndexStream.listen((index) {
+        if (index != null && index >= 0 && index < _queue.length) {
+          _queueIndexNotifier.value = index;
+        }
       }),
     );
 
     _playerSubscriptions.add(
-      _player.positionStream.listen((position) {
-        // Position ticks arrive several times per second. Keep them out of the
-        // page-level setState so a progress update doesn't rebuild the entire
-        // library, settings, artwork shelves, and navigation on older phones.
-        if (!_seeking) _position.value = position;
-      }),
+      _player
+          .createPositionStream(
+            minPeriod: const Duration(milliseconds: 250),
+            maxPeriod: const Duration(milliseconds: 500),
+          )
+          .listen((position) {
+            // Position ticks arrive several times per second. Keep them out of the
+            // page-level setState so a progress update doesn't rebuild the entire
+            // library, settings, artwork shelves, and navigation on older phones.
+            if (!_seeking) _position.value = position;
+          }),
     );
     _playerSubscriptions.add(
-      _player.durationStream.listen((_) {
-        if (mounted) setState(() {});
+      _player.durationStream.listen((duration) {
+        _durationNotifier.value = duration;
       }),
     );
     _playerSubscriptions.add(
@@ -266,18 +362,33 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchTimer?.cancel();
     _sleepTimer?.cancel();
+    _historySaveTimer?.cancel();
+    _settingsUnmountTimer?.cancel();
+    _playerUnmountTimer?.cancel();
     for (final subscription in _playerSubscriptions) {
       unawaited(subscription.cancel());
     }
     _player.dispose();
     _position.dispose();
+    _isPlaying.dispose();
+    _currentTrackNotifier.dispose();
+    _durationNotifier.dispose();
+    _queueIndexNotifier.dispose();
     _search.dispose();
     _url.dispose();
     _username.dispose();
     _password.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _localFolders.isNotEmpty) {
+      unawaited(_scanLocalFolders());
+    }
   }
 
   @override
@@ -330,10 +441,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 // Keep settings mounted while closed so its slide transition
                 // can animate both when opening and when dismissing.
-                _settingsOverlay(isMobile: !isDesktop),
+                if (_settingsOverlayMounted)
+                  _settingsOverlay(isMobile: !isDesktop),
                 // Keep the player mounted so its open/close transition can run,
                 // but make the hidden layer transparent to taps.
-                if (_current != null)
+                if (_current != null && _playerOverlayMounted)
                   Positioned(
                     top: _showPlayer ? 0 : (isDesktop ? 54 : 0),
                     left: 0,
@@ -345,14 +457,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         offset: _showPlayer ? Offset.zero : Offset(0, 1),
                         duration: _reduceMotion
                             ? Duration.zero
-                            : Duration(milliseconds: 320),
+                            : Duration(milliseconds: 180),
                         curve: Curves.easeOutCubic,
                         child: AnimatedOpacity(
                           opacity: _showPlayer ? 1 : 0,
                           duration: _reduceMotion
                               ? Duration.zero
-                              : Duration(milliseconds: 220),
-                          child: _playerOverlay(),
+                              : Duration(milliseconds: 140),
+                          child: ListenableBuilder(
+                            listenable: _playbackListenable,
+                            builder: (context, child) => _playerOverlay(),
+                          ),
                         ),
                       ),
                     ),

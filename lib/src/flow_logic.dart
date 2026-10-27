@@ -2,6 +2,8 @@ part of '../main.dart';
 
 extension _FlowLogicMethods on _HomeScreenState {
   List<MusicTrack> _recommended() {
+    final cached = _cachedRecommendedTracks;
+    if (cached != null) return cached;
     final ranked = recommendTracks(
       _modeTracks
           .where((track) => !_dismissedRecommendations.contains(track.id))
@@ -27,10 +29,14 @@ extension _FlowLogicMethods on _HomeScreenState {
       });
       diversified.add(remaining.removeAt(nextIndex < 0 ? 0 : nextIndex));
     }
+    _cachedRecommendedTracks = diversified;
     return diversified;
   }
 
   List<MusicTrack> _buildFlowQueue() {
+    if (!_flowQueueDirty && _cachedFlowQueue != null) {
+      return _cachedFlowQueue!;
+    }
     // Local and server libraries can contain the same song more than once.
     // Keep one candidate per stable track ID before ranking or sampling.
     final uniqueTracks = <String, MusicTrack>{};
@@ -43,7 +49,11 @@ extension _FlowLogicMethods on _HomeScreenState {
       uniqueTracks.putIfAbsent(track.id, () => track);
     }
     final tracks = uniqueTracks.values.toList();
-    if (tracks.isEmpty) return [];
+    if (tracks.isEmpty) {
+      _cachedFlowQueue = const [];
+      _flowQueueDirty = false;
+      return _cachedFlowQueue!;
+    }
 
     final artistPlays = <String, int>{};
     final albumPlays = <String, int>{};
@@ -133,11 +143,14 @@ extension _FlowLogicMethods on _HomeScreenState {
       queue.add(remaining.removeAt(selectedIndex).track);
     }
 
+    _cachedFlowQueue = queue;
+    _flowQueueDirty = false;
     return queue;
   }
 
   void _refreshFlowQueue() {
     final current = _current;
+    _flowQueueDirty = true;
     final upcoming = _buildFlowQueue()
         .where((track) => track.id != current?.id)
         .toList();
@@ -145,11 +158,13 @@ extension _FlowLogicMethods on _HomeScreenState {
     _updateState(() {
       _queue = [?current, ...upcoming];
       _queueIndex = 0;
+      _queueIndexNotifier.value = 0;
     });
     unawaited(_saveQueue());
   }
 
   Future<void> _startFlow() async {
+    _flowQueueDirty = true;
     final picks = _buildFlowQueue();
     if (picks.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -289,6 +304,8 @@ extension _FlowLogicMethods on _HomeScreenState {
   Future<void> _rateCurrentTrack({required bool like}) async {
     final track = _current;
     if (track == null) return;
+    _flowQueueDirty = true;
+    _invalidateRecommendationCaches();
     _updateState(() {
       final value = like ? 1 : -1;
       _tasteTrackFeedback[track.id] = value;
@@ -310,6 +327,7 @@ extension _FlowLogicMethods on _HomeScreenState {
   Future<void> _hideCurrentFromFlow() async {
     final track = _current;
     if (track == null || !_flowActive) return;
+    _flowQueueDirty = true;
     _updateState(() => _flowHiddenTrackIds.add(track.id));
     final preferences = await SharedPreferences.getInstance();
     await preferences.setStringList(
@@ -331,6 +349,7 @@ extension _FlowLogicMethods on _HomeScreenState {
   }
 
   Future<void> _clearFlowHiddenTracks() async {
+    _flowQueueDirty = true;
     _updateState(() => _flowHiddenTrackIds.clear());
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove(_flowHiddenTracksKey);
@@ -377,6 +396,8 @@ extension _FlowLogicMethods on _HomeScreenState {
   }
 
   Future<void> _resetTasteProfile() async {
+    _flowQueueDirty = true;
+    _invalidateRecommendationCaches();
     _updateState(() {
       _tasteArtistFeedback.clear();
       _tasteTrackFeedback.clear();

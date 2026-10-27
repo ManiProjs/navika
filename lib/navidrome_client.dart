@@ -42,6 +42,7 @@ class MusicTrack {
     this.localPath,
     this.localArtworkPath,
     this.localMetadataRead = false,
+    this.localModifiedMillis,
   });
 
   final String id;
@@ -54,6 +55,7 @@ class MusicTrack {
   final String? localPath;
   final String? localArtworkPath;
   final bool localMetadataRead;
+  final int? localModifiedMillis;
 
   bool get isLocal => localPath != null && localPath!.isNotEmpty;
 
@@ -72,6 +74,7 @@ class MusicTrack {
     localPath: json['localPath'] as String?,
     localArtworkPath: json['localArtworkPath'] as String?,
     localMetadataRead: json['localMetadataRead'] as bool? ?? false,
+    localModifiedMillis: (json['localModifiedMillis'] as num?)?.toInt(),
   );
 
   MusicTrack withCover(String? url) => MusicTrack(
@@ -85,6 +88,7 @@ class MusicTrack {
     localPath: localPath,
     localArtworkPath: localArtworkPath,
     localMetadataRead: localMetadataRead,
+    localModifiedMillis: localModifiedMillis,
   );
 
   Map<String, dynamic> toJson() => {
@@ -98,6 +102,7 @@ class MusicTrack {
     'localPath': localPath,
     'localArtworkPath': localArtworkPath,
     'localMetadataRead': localMetadataRead,
+    'localModifiedMillis': localModifiedMillis,
   };
 }
 

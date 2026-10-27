@@ -65,13 +65,38 @@ extension _HomeDataMethods on _HomeScreenState {
     return 'Good night.';
   }
 
-  Map<String, MusicTrack> get _tracksById => {
-    for (final track in _modeTracks) track.id: track,
-  };
+  Map<String, MusicTrack> get _tracksById {
+    final tracks = _modeTracks;
+    if (identical(_cachedTracksByIdSource, tracks) &&
+        _cachedTracksById != null) {
+      return _cachedTracksById!;
+    }
+    _cachedTracksByIdSource = tracks;
+    _cachedTracksById = {for (final track in tracks) track.id: track};
+    _cachedFavoriteTracks = null;
+    return _cachedTracksById!;
+  }
 
-  List<MusicTrack> get _modeTracks => _showLocalLibrary
-      ? _mergeLibraryTracks(_localTracks)
-      : _mergeLibraryTracks(_tracks.where((track) => !track.isLocal));
+  List<MusicTrack> get _modeTracks {
+    if (identical(_cachedModeSource, _tracks) &&
+        identical(_cachedLocalSource, _localTracks) &&
+        _cachedModeIsLocal == _showLocalLibrary &&
+        _cachedModeTracks != null) {
+      return _cachedModeTracks!;
+    }
+    _cachedModeSource = _tracks;
+    _cachedLocalSource = _localTracks;
+    _cachedModeIsLocal = _showLocalLibrary;
+    _cachedModeTracks = _showLocalLibrary
+        ? _mergeLibraryTracks(_localTracks)
+        : _mergeLibraryTracks(_tracks.where((track) => !track.isLocal));
+    _cachedTracksById = null;
+    _cachedTracksByIdSource = null;
+    _cachedFavoriteTracks = null;
+    _invalidateRecommendationCaches();
+    _flowQueueDirty = true;
+    return _cachedModeTracks!;
+  }
 
   List<MusicTrack> _mergeLibraryTracks(Iterable<MusicTrack> tracks) {
     final unique = <String, MusicTrack>{};
@@ -99,8 +124,10 @@ extension _HomeDataMethods on _HomeScreenState {
 
   List<MusicTrack> get _visibleLibraryTracks => _modeTracks;
 
-  List<MusicTrack> get _favoriteTracks =>
-      _favorites.map((id) => _tracksById[id]).whereType<MusicTrack>().toList();
+  List<MusicTrack> get _favoriteTracks => _cachedFavoriteTracks ??= _favorites
+      .map((id) => _tracksById[id])
+      .whereType<MusicTrack>()
+      .toList();
 
   void _selectTab(AppTab tab) {
     _updateState(() {
@@ -337,10 +364,6 @@ extension _HomeDataMethods on _HomeScreenState {
       Future<void>.delayed(const Duration(milliseconds: 700), () {
         if (!mounted) return;
         unawaited(_scanLocalFolders());
-        _folderScanTimer ??= Timer.periodic(
-          _localFolderRescanInterval,
-          (_) => unawaited(_scanLocalFolders()),
-        );
       });
     }
     _dismissedRecommendations.addAll(
@@ -382,7 +405,9 @@ extension _HomeDataMethods on _HomeScreenState {
       }
     }
 
-    _favorites = preferences.getStringList(_favoritesKey) ?? [];
+    _favorites = (preferences.getStringList(_favoritesKey) ?? []).toSet();
+    _invalidateRecommendationCaches();
+    _flowQueueDirty = true;
 
     final savedPlaylists = preferences.getString(_playlistsKey);
     if (savedPlaylists != null) {
@@ -499,6 +524,7 @@ extension _HomeDataMethods on _HomeScreenState {
         _tracks = List.of(_localTracks);
         _queue = [];
         _queueIndex = 0;
+        _queueIndexNotifier.value = 0;
         _connected = true;
         _libraryLoaded = false;
         _libraryError = '';
@@ -623,10 +649,6 @@ extension _HomeDataMethods on _HomeScreenState {
       await preferences.setStringList(_localFoldersKey, folders);
       if (!mounted) return;
       _updateState(() => _localFolders = folders);
-      _folderScanTimer ??= Timer.periodic(
-        _localFolderRescanInterval,
-        (_) => unawaited(_scanLocalFolders()),
-      );
       await _scanLocalFolders(showFeedback: true);
     } catch (error) {
       if (!mounted) return;
@@ -698,6 +720,17 @@ extension _HomeDataMethods on _HomeScreenState {
     String? album;
     int duration = 0;
     String? artworkPath;
+    int? modifiedMillis;
+
+    if (!isContentUri) {
+      try {
+        modifiedMillis = (await File(
+          path,
+        ).lastModified()).millisecondsSinceEpoch;
+      } on FileSystemException {
+        // Some virtual filesystems do not expose timestamps; metadata still works.
+      }
+    }
 
     try {
       final metadata = isContentUri
@@ -728,7 +761,9 @@ extension _HomeDataMethods on _HomeScreenState {
         final supportDirectory = await getApplicationSupportDirectory();
         final artworkDirectory = Directory('${supportDirectory.path}/artwork');
         await artworkDirectory.create(recursive: true);
-        final digest = md5.convert(utf8.encode(path)).toString();
+        final digest = md5
+            .convert(utf8.encode('$path:$modifiedMillis'))
+            .toString();
         final artworkFile = File('${artworkDirectory.path}/$digest.img');
         if (!await artworkFile.exists()) {
           await artworkFile.writeAsBytes(artwork, flush: true);
@@ -751,13 +786,14 @@ extension _HomeDataMethods on _HomeScreenState {
       localPath: path,
       localArtworkPath: artworkPath,
       localMetadataRead: true,
+      localModifiedMillis: modifiedMillis,
     );
   }
 
   Future<void> _scanLocalFolders({bool showFeedback = false}) async {
     if (_localFolders.isEmpty) return;
     if (_scanningLocalFolders) {
-      // A folder can be added while startup or the periodic refresh is already
+      // A folder can be added while startup or a manual refresh is already
       // scanning. Never drop that request: run another pass with the latest
       // folder list as soon as the active scan finishes.
       _localFolderScanRequested = true;
@@ -767,6 +803,10 @@ extension _HomeDataMethods on _HomeScreenState {
     _scanningLocalFolders = true;
     try {
       final discovered = <String, MusicTrack>{};
+      final existingByPath = <String, MusicTrack>{
+        for (final track in _localTracks)
+          if (track.localPath != null) track.localPath!: track,
+      };
       final inaccessibleFolders = <String>[];
       final folderErrors = <String, String>{};
       for (final folder in _localFolders) {
@@ -780,22 +820,10 @@ extension _HomeDataMethods on _HomeScreenState {
             );
             paths = result ?? const <String>[];
           } else {
-            final directory = Directory(folder);
-            if (!await directory.exists()) {
-              inaccessibleFolders.add(folder);
-              folderErrors[folder] = 'Folder no longer exists';
-              continue;
-            }
-            final found = <String>[];
-            await for (final entity in directory.list(
-              recursive: true,
-              followLinks: false,
-            )) {
-              if (entity is File && _isAudioFile(entity.path)) {
-                found.add(entity.path);
-              }
-            }
-            paths = found;
+            paths = await compute<String, List<String>>(
+              _listAudioPathsInFolder,
+              folder,
+            );
           }
           for (final path in paths) {
             // Android's SAF scanner already filters by the document's real
@@ -806,13 +834,28 @@ extension _HomeDataMethods on _HomeScreenState {
                 !_isAudioFile(path)) {
               continue;
             }
-            final existing = _localTracks.where(
-              (track) => track.localPath == path,
-            );
-            discovered['local:$path'] =
-                existing.isNotEmpty && existing.first.localMetadataRead
-                ? existing.first
-                : await _localTrackFromPath(path);
+            final existing = existingByPath[path];
+            if (existing != null && existing.localMetadataRead) {
+              if (Platform.isAndroid && path.startsWith('content://')) {
+                discovered['local:$path'] = existing;
+                continue;
+              }
+              try {
+                final modified = (await File(
+                  path,
+                ).lastModified()).millisecondsSinceEpoch;
+                if (existing.localModifiedMillis == modified) {
+                  discovered['local:$path'] = existing;
+                  continue;
+                }
+              } on FileSystemException {
+                if (existing.localModifiedMillis == null) {
+                  discovered['local:$path'] = existing;
+                  continue;
+                }
+              }
+            }
+            discovered['local:$path'] = await _localTrackFromPath(path);
           }
         } catch (error) {
           inaccessibleFolders.add(folder);
@@ -895,7 +938,7 @@ extension _HomeDataMethods on _HomeScreenState {
             ? 'Could not read ${folderErrors.length} folder(s): ${folderErrors.entries.map((entry) => '${entry.key}: ${entry.value}').join('; ')}'
             : discovered.isEmpty
             ? 'No supported audio files found. Navika checks MP3, M4A, AAC, WAV, FLAC, OGG, OPUS, AIFF, ALAC, WMA, MIDI and other common formats.'
-            : 'Folder added. Found ${discovered.length} audio file(s); checking for changes every minute.';
+            : 'Folder added. Found ${discovered.length} audio file(s); folders rescan when the app resumes or you tap refresh.';
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(message)));
       }
