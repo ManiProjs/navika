@@ -52,7 +52,9 @@ void main() {
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const NavikaApp());
+    await tester.pumpWidget(
+      NavikaApp(credentialReaderOverride: (_) async => null),
+    );
     await tester.pump();
 
     expect(find.text('Home'), findsWidgets);
@@ -64,7 +66,9 @@ void main() {
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const NavikaApp());
+    await tester.pumpWidget(
+      NavikaApp(credentialReaderOverride: (_) async => null),
+    );
     await tester.pump();
 
     await tester.tap(find.text('Search').last);

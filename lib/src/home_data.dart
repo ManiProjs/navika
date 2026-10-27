@@ -433,7 +433,9 @@ extension _HomeDataMethods on _HomeScreenState {
 
     String? saved;
     try {
-      saved = await _readCredentialJson(preferences);
+      saved = widget.credentialReaderOverride == null
+          ? await _readCredentialJson(preferences)
+          : await widget.credentialReaderOverride!(preferences);
     } catch (error) {
       if (!mounted) return;
       _updateState(() {

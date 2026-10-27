@@ -85,6 +85,9 @@ abstract final class C {
 }
 
 const _credentialsKey = 'navika.navidrome.credentials';
+typedef CredentialReaderOverride = Future<String?> Function(
+  SharedPreferences preferences,
+);
 const _secureCredentialsChannel = MethodChannel(
   'app.navika/secure_credentials',
 );
@@ -167,7 +170,9 @@ extension AppTabInfo on AppTab {
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.credentialReaderOverride});
+
+  final CredentialReaderOverride? credentialReaderOverride;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();

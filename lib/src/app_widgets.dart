@@ -1,7 +1,9 @@
 part of '../main.dart';
 
 class NavikaApp extends StatelessWidget {
-  const NavikaApp({super.key});
+  const NavikaApp({super.key, this.credentialReaderOverride});
+
+  final CredentialReaderOverride? credentialReaderOverride;
 
   @override
   Widget build(BuildContext context) {
@@ -109,23 +111,27 @@ class NavikaApp extends StatelessWidget {
           dividerColor: C.border,
           useMaterial3: true,
         ),
-        home: const _StartupGate(),
+        home: _StartupGate(credentialReaderOverride: credentialReaderOverride),
       ),
     );
   }
 }
 
 class _StartupGate extends StatelessWidget {
-  const _StartupGate();
+  const _StartupGate({this.credentialReaderOverride});
+
+  final CredentialReaderOverride? credentialReaderOverride;
 
   @override
   Widget build(BuildContext context) {
-    if (!_audioServiceInitializationRequired) return const HomeScreen();
+    if (!_audioServiceInitializationRequired) {
+      return HomeScreen(credentialReaderOverride: credentialReaderOverride);
+    }
     return FutureBuilder<void>(
       future: _audioServiceReady,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.done) {
-          return const HomeScreen();
+          return HomeScreen(credentialReaderOverride: credentialReaderOverride);
         }
         return Scaffold(
           backgroundColor: C.bg,
