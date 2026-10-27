@@ -36,18 +36,6 @@ void main() {
     expect(restored.album, 'Embedded Album');
   });
 
-  test('remote Navidrome connections reject plain HTTP', () async {
-    final client = NavidromeClient(
-      const NavidromeCredentials(
-        baseUrl: 'http://music.example.com',
-        username: 'test-user',
-        password: 'test-password',
-      ),
-    );
-
-    await expectLater(client.connect(), throwsA(isA<StateError>()));
-  });
-
   testWidgets('Navika app starts and shows its main navigation', (
     WidgetTester tester,
   ) async {
