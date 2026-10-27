@@ -663,15 +663,20 @@ extension _HomeDataMethods on _HomeScreenState {
   }
 
   Future<String?> _linuxKeyringRead() async {
-    final result = await Process.run('secret-tool', [
+    final process = await Process.start('secret-tool', [
       'lookup',
       'app',
       'navika',
       'kind',
       'credentials',
     ]);
-    if (result.exitCode != 0) return null;
-    final value = (result.stdout as String).trimRight();
+    final outputFuture = process.stdout.transform(utf8.decoder).join();
+    final errorFuture = process.stderr.transform(utf8.decoder).join();
+    final exitCode = await process.exitCode;
+    final output = await outputFuture;
+    await errorFuture;
+    if (exitCode != 0) return null;
+    final value = output.trimRight();
     return value.isEmpty ? null : value;
   }
 
@@ -697,14 +702,19 @@ extension _HomeDataMethods on _HomeScreenState {
   }
 
   Future<void> _linuxKeyringDelete() async {
-    final result = await Process.run('secret-tool', [
+    final process = await Process.start('secret-tool', [
       'clear',
       'app',
       'navika',
       'kind',
       'credentials',
     ]);
-    if (result.exitCode != 0) {
+    final outputFuture = process.stdout.transform(utf8.decoder).join();
+    final errorFuture = process.stderr.transform(utf8.decoder).join();
+    final exitCode = await process.exitCode;
+    await outputFuture;
+    await errorFuture;
+    if (exitCode != 0) {
       throw StateError('Linux keyring could not remove saved credentials');
     }
   }
