@@ -58,7 +58,7 @@ extension _LibraryPageMethods on _HomeScreenState {
                       ),
                       child: Row(
                         children: [
-                          Icon(playlist.icon, color: C.lime, size: 22),
+                          _playlistArtwork(playlist.tracks, size: 48),
                           SizedBox(width: 12),
                           Expanded(
                             child: Column(
@@ -139,11 +139,7 @@ extension _LibraryPageMethods on _HomeScreenState {
                     children: [
                       Row(
                         children: [
-                          Icon(
-                            Icons.queue_music_rounded,
-                            color: C.lime,
-                            size: 26,
-                          ),
+                          _playlistArtwork(tracks, size: 52),
                           SizedBox(width: 12),
                           Expanded(
                             child: Text(
@@ -246,6 +242,39 @@ extension _LibraryPageMethods on _HomeScreenState {
             }),
         ],
       ],
+    );
+  }
+
+  Widget _playlistArtwork(List<MusicTrack> tracks, {double size = 52}) {
+    final covers = tracks.take(4).toList(growable: false);
+    final cellSize = size / 2;
+
+    Widget cell(int index) {
+      final track = index < covers.length ? covers[index] : null;
+      return SizedBox(
+        width: cellSize,
+        height: cellSize,
+        child: _artwork(
+          track?.coverArt,
+          localArtworkPath: track?.localArtworkPath,
+          size: cellSize,
+          seed: track?.album ?? 'playlist-$index',
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: Column(
+          children: [
+            Row(children: [cell(0), cell(1)]),
+            Row(children: [cell(2), cell(3)]),
+          ],
+        ),
+      ),
     );
   }
 

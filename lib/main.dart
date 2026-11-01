@@ -323,6 +323,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _historySaveTimer;
   Timer? _settingsUnmountTimer;
   Timer? _playerUnmountTimer;
+  Timer? _flowUnmountTimer;
   int _searchRequestId = 0;
   final Set<String> _dismissedRecommendations = {};
   final Map<String, int> _tasteArtistFeedback = {};
@@ -383,6 +384,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _showPlayer = false;
   bool _playerOverlayMounted = false;
   bool _showFlow = false;
+  bool _flowOverlayMounted = false;
   int _flowPage = 0;
   bool _flowActive = false;
   String? _flowResumeTrackId;
@@ -415,6 +417,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _updateState(VoidCallback update) {
     final wasSettingsOpen = _showSettings;
     final wasPlayerOpen = _showPlayer;
+    final wasFlowOpen = _showFlow;
     setState(() {
       update();
       if (_showSettings) {
@@ -440,6 +443,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           () {
             if (!mounted || _showPlayer) return;
             setState(() => _playerOverlayMounted = false);
+          },
+        );
+      }
+      if (_showFlow) {
+        _flowUnmountTimer?.cancel();
+        _flowOverlayMounted = true;
+      } else if (wasFlowOpen && _flowOverlayMounted) {
+        _flowUnmountTimer?.cancel();
+        _flowUnmountTimer = Timer(
+          _reduceMotion ? Duration.zero : const Duration(milliseconds: 160),
+          () {
+            if (!mounted || _showFlow) return;
+            setState(() => _flowOverlayMounted = false);
           },
         );
       }
@@ -566,6 +582,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _historySaveTimer?.cancel();
     _settingsUnmountTimer?.cancel();
     _playerUnmountTimer?.cancel();
+    _flowUnmountTimer?.cancel();
     for (final subscription in _playerSubscriptions) {
       unawaited(subscription.cancel());
     }
@@ -683,7 +700,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                     ),
                   ),
-                if (_showFlow) Positioned.fill(child: _flowOverlay()),
+                if (_flowOverlayMounted)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      ignoring: !_showFlow,
+                      child: AnimatedSlide(
+                        offset: _showFlow ? Offset.zero : Offset(0, .01),
+                        duration: _reduceMotion
+                            ? Duration.zero
+                            : Duration(milliseconds: 160),
+                        curve: Curves.easeOutCubic,
+                        child: AnimatedOpacity(
+                          opacity: _showFlow ? 1 : 0,
+                          duration: _reduceMotion
+                              ? Duration.zero
+                              : Duration(milliseconds: 160),
+                          curve: Curves.easeOutCubic,
+                          child: _flowOverlay(),
+                        ),
+                      ),
+                    ),
+                  ),
                 // Keep the custom app titlebar above the player overlay so it
                 // remains visible and interactive while the player is open.
                 if (isDesktop && !_showPlayer && !_showFlow)
