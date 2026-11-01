@@ -220,6 +220,100 @@ extension _SettingsMethods on _HomeScreenState {
                                   },
                                 ),
                               ),
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                value: _replayGainEnabled,
+                                activeThumbColor: C.black,
+                                activeTrackColor: C.lime,
+                                inactiveThumbColor: C.muted,
+                                inactiveTrackColor: C.surface2,
+                                title: Text(
+                                  'ReplayGain normalization',
+                                  style: TextStyle(
+                                    fontFamily: 'DMSansMedium',
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  'Balance track loudness using ReplayGain tags. Peak limiting helps prevent clipping.',
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                    height: 1.5,
+                                  ),
+                                ),
+                                onChanged: _setReplayGainEnabled,
+                              ),
+                              if (_replayGainEnabled) ...[
+                                ListTile(
+                                  contentPadding: EdgeInsets.only(left: 16),
+                                  title: Text(
+                                    'Gain mode',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                  subtitle: Text(
+                                    _replayGainAlbumMode
+                                        ? 'Keep each album at a consistent level.'
+                                        : 'Normalize every track independently.',
+                                    style: TextStyle(
+                                      color: C.muted,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                  trailing: DropdownButton<bool>(
+                                    value: _replayGainAlbumMode,
+                                    items: [
+                                      DropdownMenuItem(
+                                        value: false,
+                                        child: Text('Track'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: true,
+                                        child: Text('Album'),
+                                      ),
+                                    ],
+                                    onChanged: (value) {
+                                      if (value != null) {
+                                        unawaited(
+                                          _setReplayGainAlbumMode(value),
+                                        );
+                                      }
+                                    },
+                                  ),
+                                ),
+                                ListTile(
+                                  contentPadding: EdgeInsets.only(left: 16),
+                                  title: Text(
+                                    'Preamp',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                  subtitle: Text(
+                                    ' ${_replayGainPreampDb > 0 ? '+' : ''}${_replayGainPreampDb.toStringAsFixed(0)} dB',
+                                    style: TextStyle(
+                                      color: C.muted,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                  trailing: DropdownButton<double>(
+                                    value: _replayGainPreampDb,
+                                    items: [-6.0, -3.0, 0.0, 3.0, 6.0]
+                                        .map(
+                                          (value) => DropdownMenuItem(
+                                            value: value,
+                                            child: Text(
+                                              '${value > 0 ? '+' : ''}${value.toStringAsFixed(0)} dB',
+                                            ),
+                                          ),
+                                        )
+                                        .toList(),
+                                    onChanged: (value) {
+                                      if (value != null) {
+                                        unawaited(_setReplayGainPreamp(value));
+                                      }
+                                    },
+                                  ),
+                                ),
+                              ],
                               ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 title: Text(
@@ -441,7 +535,7 @@ extension _SettingsMethods on _HomeScreenState {
                               Padding(
                                 padding: EdgeInsets.only(bottom: 8),
                                 child: Text(
-                                  'Navika learns from your listening history, favorites, and feedback. Explicit feedback is saved only on this device and influences Flow.',
+                                  'Navika learns from listening history, favorites, and your track and artist feedback. Flow preferences stay on this device.',
                                   style: TextStyle(
                                     color: C.muted,
                                     fontSize: 10,
@@ -462,29 +556,65 @@ extension _SettingsMethods on _HomeScreenState {
                                   subtitle: Text(
                                     '${artist.plays} plays${artist.feedback == 0
                                         ? ''
-                                        : artist.feedback > 0
-                                        ? ' · you like this artist'
-                                        : ' · lower priority'}',
+                                        : artist.feedback == -2
+                                        ? ' · excluded from Flow'
+                                        : artist.feedback == -1
+                                        ? ' · lower priority'
+                                        : artist.feedback == 2
+                                        ? ' · more requested'
+                                        : ' · you like this artist'}',
                                     style: TextStyle(
                                       color: C.muted,
                                       fontSize: 10,
                                     ),
                                   ),
-                                  trailing: artist.feedback == 0
-                                      ? Icon(
-                                          Icons.graphic_eq_rounded,
-                                          color: C.muted,
-                                          size: 17,
-                                        )
-                                      : Icon(
-                                          artist.feedback > 0
-                                              ? Icons.thumb_up_alt_rounded
-                                              : Icons.thumb_down_alt_rounded,
-                                          color: artist.feedback > 0
-                                              ? C.lime
-                                              : C.danger,
-                                          size: 17,
+                                  trailing: PopupMenuButton<int>(
+                                    tooltip:
+                                        'Change Flow preference for ${artist.artist}',
+                                    onSelected: (value) => _setArtistFeedback(
+                                      artist.artist,
+                                      value,
+                                    ),
+                                    itemBuilder: (context) => [
+                                      PopupMenuItem(
+                                        value: 2,
+                                        child: Text('More from this artist'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 1,
+                                        child: Text('Like this artist'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: -1,
+                                        child: Text('Less from this artist'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: -2,
+                                        child: Text(
+                                          'Never play this artist in Flow',
                                         ),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 0,
+                                        child: Text('Reset artist preference'),
+                                      ),
+                                    ],
+                                    icon: Icon(
+                                      artist.feedback == -2
+                                          ? Icons.block_rounded
+                                          : artist.feedback > 0
+                                          ? Icons.thumb_up_alt_rounded
+                                          : artist.feedback < 0
+                                          ? Icons.thumb_down_alt_rounded
+                                          : Icons.more_horiz_rounded,
+                                      color: artist.feedback == -2
+                                          ? C.danger
+                                          : artist.feedback > 0
+                                          ? C.lime
+                                          : C.muted,
+                                      size: 18,
+                                    ),
+                                  ),
                                 ),
                               ),
                               if (tasteTopArtists.isEmpty)
@@ -505,7 +635,7 @@ extension _SettingsMethods on _HomeScreenState {
                                   style: TextStyle(fontSize: 12),
                                 ),
                                 subtitle: Text(
-                                  'Clear your More/Less like this feedback. Listening history and favorites stay intact.',
+                                  'Clear track and artist feedback. Listening history, favorites, and Flow exclusions stay intact.',
                                   style: TextStyle(
                                     color: C.muted,
                                     fontSize: 10,

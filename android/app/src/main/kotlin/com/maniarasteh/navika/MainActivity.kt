@@ -1,4 +1,4 @@
-package com.example.navika
+package com.maniarasteh.navika
 
 import android.app.Activity
 import android.content.Intent
@@ -115,6 +115,7 @@ class MainActivity : AudioServiceActivity() {
                                         "artist" to (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
                                             ?: retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)),
                                         "album" to retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM),
+                                        "genre" to retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE),
                                         "duration" to retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                                             ?.toLongOrNull()?.div(1000L),
                                         "artwork" to retriever.embeddedPicture,

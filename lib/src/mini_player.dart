@@ -63,23 +63,25 @@ extension _MiniPlayerMethods on _HomeScreenState {
                         ),
                       ),
                     ),
-                    IconButton(
-                      tooltip: 'Play or pause',
-                      onPressed: _togglePlayback,
-                      icon: ValueListenableBuilder<bool>(
-                        valueListenable: _isPlaying,
-                        builder: (context, playing, _) => Icon(
-                          playing
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded,
-                          color: C.lime,
-                        ),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _isPlaying,
+                      builder: (context, playing, _) => _playbackControlButton(
+                        icon: playing
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        tooltip: playing ? 'Pause' : 'Play',
+                        onPressed: _togglePlayback,
+                        primary: true,
+                        buttonSize: 40,
+                        iconSize: 21,
                       ),
                     ),
-                    IconButton(
+                    _playbackControlButton(
+                      icon: Icons.skip_next_rounded,
                       tooltip: 'Next track',
                       onPressed: () => _skip(1),
-                      icon: Icon(Icons.skip_next_rounded),
+                      buttonSize: 40,
+                      iconSize: 21,
                     ),
                     IconButton(
                       tooltip: 'Open player',
@@ -127,6 +129,7 @@ extension _MiniPlayerMethods on _HomeScreenState {
     if (_current == null || _showPlayer) return;
     _updateState(() {
       _showUpNext = false;
+      _showLyrics = false;
       _showPlayer = true;
     });
   }

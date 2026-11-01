@@ -1,13 +1,24 @@
-# Navika v0.1.2
+# Navika v0.2.0
 
-This is an emergency update that reverts the requirement of HTTPS for Navidrome servers and makes it optional.
+This release brings Navika to the car, adds synchronized lyrics and smart playlists, and improves playback personalization and loudness handling.
 
-> [!WARNING]
->
-> Although Navika does not require HTTPS, it's essential to add HTTPS support to your Navidrome server (if it's open to the internet) because it reduces security risks and also makes the connections secure!
+## What's new
 
-## What's changed?
+- **Android Auto** — browse your music library, favorites, recent tracks and playlists from a compatible car display, with playback controls and metadata.
+- **Synchronized lyrics** — fetch timed lyrics from LRCLIB and follow along with the currently playing track. Plain-text lyrics are supported when timed lyrics are unavailable.
+- **Smart playlists** — automatically generated collections for Recently played, Most played, Never played, Forgotten favorites and Short & sweet.
+- **ReplayGain normalization** — use track or album gain metadata from Navidrome and supported local audio tags. Choose a preamp level, and use peak metadata to help avoid clipping. Tracks without ReplayGain tags play normally.
 
-- **Do not require HTTPS**: Navika doesn't require HTTPS for Navidrome servers anymore.
+## Improvements
 
-**HEADS UP**: Again, although Navika doesn't require HTTPS, it's HIGHLY RECOMMENDED to add HTTPS support to your Navidrome server.
+- **Flow** — more consistent artist variety, session-aware queue generation, track exclusions and the ability to resume a Flow session.
+- **Player experience** — clearer tactile playback controls, plus lyrics and Up Next panels that switch in the same player area.
+- **App identity** — platform application identifiers now use `com.maniarasteh.navika`.
+- **Playback integration** — more complete media metadata and controls for Android's media experience.
+
+## Upgrade notes
+
+- Android treats the new application ID as a different app from earlier builds using `com.example.navika`. The previous installation may remain separately installed; transfer or back up any local-only data before removing it.
+- ReplayGain only changes tracks that include usable gain metadata. It does not analyze audio or create ReplayGain tags.
+
+---

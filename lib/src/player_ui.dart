@@ -1,6 +1,44 @@
 part of '../main.dart';
 
 extension _PlayerUiMethods on _HomeScreenState {
+  Widget _playbackControlButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    Color? color,
+    double iconSize = 21,
+    bool active = false,
+    bool primary = false,
+    double buttonSize = 44,
+  }) {
+    final background = primary ? C.lime : C.surface2;
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: Icon(
+        icon,
+        size: iconSize,
+        color: primary ? C.black : (color ?? (active ? C.lime : C.text)),
+      ),
+      style: ButtonStyle(
+        fixedSize: WidgetStatePropertyAll(Size(buttonSize, buttonSize)),
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        backgroundColor: WidgetStatePropertyAll(background),
+        side: WidgetStatePropertyAll(
+          BorderSide(color: primary || active ? C.lime : C.border),
+        ),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(primary ? 99 : 14),
+          ),
+        ),
+        overlayColor: WidgetStatePropertyAll(
+          (primary ? C.black : C.lime).withValues(alpha: .12),
+        ),
+      ),
+    );
+  }
+
   Widget _playerOverlay() {
     final track = _current!;
     final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
@@ -42,6 +80,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                       onPressed: () => _updateState(() {
                         _showPlayer = false;
                         _showUpNext = false;
+                        _showLyrics = false;
                         if (_flowActive) _showFlow = true;
                       }),
                       icon: Icon(Icons.chevron_left_rounded, size: 30),
@@ -70,6 +109,16 @@ extension _PlayerUiMethods on _HomeScreenState {
                       ],
                     ),
                     Spacer(),
+                    IconButton(
+                      tooltip: _showLyrics
+                          ? 'Lyrics are showing'
+                          : 'Show lyrics',
+                      onPressed: () => _openLyrics(track),
+                      icon: Icon(
+                        Icons.lyrics_outlined,
+                        color: _showLyrics ? C.lime : null,
+                      ),
+                    ),
                     IconButton(
                       tooltip: _showVisualizer
                           ? 'Hide visualizer'
@@ -108,7 +157,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                     ),
                   ),
                   child: LayoutBuilder(
-                    key: ValueKey(_showUpNext),
+                    key: ValueKey((_showUpNext, _showLyrics)),
                     builder: (context, constraints) {
                       final artSize = (constraints.maxWidth * .72).clamp(
                         220.0,
@@ -120,7 +169,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                         // shorter windows to avoid a bottom RenderFlex overflow.
                         final desktopArtSize = (constraints.maxHeight * .58)
                             .clamp(220.0, 390.0);
-                        if (_showUpNext) {
+                        if (_showUpNext || _showLyrics) {
                           return Padding(
                             padding: EdgeInsets.fromLTRB(28, 12, 28, 12),
                             child: Row(
@@ -206,60 +255,45 @@ extension _PlayerUiMethods on _HomeScreenState {
                                         mainAxisAlignment:
                                             MainAxisAlignment.center,
                                         children: [
-                                          IconButton(
+                                          _playbackControlButton(
+                                            icon: Icons.shuffle_rounded,
                                             tooltip: 'Shuffle',
                                             onPressed: _toggleShuffle,
-                                            icon: Icon(
-                                              Icons.shuffle_rounded,
-                                              color: _shuffle
-                                                  ? C.lime
-                                                  : C.muted,
-                                            ),
+                                            active: _shuffle,
                                           ),
-                                          IconButton(
+                                          _playbackControlButton(
+                                            icon: Icons.skip_previous_rounded,
                                             tooltip: 'Previous track',
                                             onPressed: () => _skip(-1),
-                                            icon: Icon(
-                                              Icons.skip_previous_rounded,
-                                              size: 27,
-                                            ),
+                                            iconSize: 27,
                                           ),
-                                          IconButton(
+                                          _playbackControlButton(
+                                            icon: _player.playing
+                                                ? Icons.pause_rounded
+                                                : Icons.play_arrow_rounded,
                                             tooltip: _player.playing
                                                 ? 'Pause'
                                                 : 'Play',
                                             onPressed: _togglePlayback,
-                                            icon: Icon(
-                                              _player.playing
-                                                  ? Icons
-                                                        .pause_circle_filled_rounded
-                                                  : Icons
-                                                        .play_circle_fill_rounded,
-                                              color: C.lime,
-                                              size: 54,
-                                            ),
+                                            primary: true,
+                                            buttonSize: 58,
+                                            iconSize: 30,
                                           ),
-                                          IconButton(
+                                          _playbackControlButton(
+                                            icon: Icons.skip_next_rounded,
                                             tooltip: 'Next track',
                                             onPressed: () => _skip(1),
-                                            icon: Icon(
-                                              Icons.skip_next_rounded,
-                                              size: 27,
-                                            ),
+                                            iconSize: 27,
                                           ),
-                                          IconButton(
+                                          _playbackControlButton(
+                                            icon: Icons.repeat_rounded,
                                             tooltip: _repeatOne
                                                 ? 'Repeat one'
                                                 : _repeatAll
                                                 ? 'Repeat all'
                                                 : 'Repeat off',
                                             onPressed: _cycleRepeatMode,
-                                            icon: Icon(
-                                              Icons.repeat_rounded,
-                                              color: (_repeatAll || _repeatOne)
-                                                  ? C.lime
-                                                  : C.muted,
-                                            ),
+                                            active: _repeatAll || _repeatOne,
                                           ),
                                         ],
                                       ),
@@ -279,120 +313,174 @@ extension _PlayerUiMethods on _HomeScreenState {
                                         children: [
                                           Expanded(
                                             child: Text(
-                                              'Up next',
+                                              _showLyrics
+                                                  ? 'Lyrics'
+                                                  : 'Up next',
                                               style: TextStyle(
                                                 fontFamily: 'SyneBold',
                                                 fontSize: 22,
                                               ),
                                             ),
                                           ),
-                                          IconButton(
-                                            tooltip: 'Close Up Next',
-                                            onPressed: () => _updateState(
-                                              () => _showUpNext = false,
-                                            ),
-                                            icon: Icon(Icons.close_rounded),
-                                          ),
                                           TextButton(
-                                            onPressed: _clearUpcoming,
-                                            child: Text('Clear'),
-                                          ),
-                                        ],
-                                      ),
-                                      SizedBox(height: 8),
-                                      Text(
-                                        'NOW PLAYING',
-                                        style: TextStyle(
-                                          color: C.muted,
-                                          fontSize: 10,
-                                          letterSpacing: 1.1,
-                                        ),
-                                      ),
-                                      SizedBox(height: 10),
-                                      Container(
-                                        padding: EdgeInsets.all(10),
-                                        decoration: BoxDecoration(
-                                          color: C.surface,
-                                          borderRadius: BorderRadius.circular(
-                                            10,
-                                          ),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(5),
-                                              child: _artwork(
-                                                track.coverArt,
-                                                localArtworkPath:
-                                                    track.localArtworkPath,
-                                                size: 42,
-                                                seed: track.album,
-                                              ),
+                                            onPressed: () {
+                                              final showLyrics = !_showLyrics;
+                                              _updateState(() {
+                                                _showLyrics = showLyrics;
+                                                _showUpNext = !showLyrics;
+                                              });
+                                              if (showLyrics) {
+                                                unawaited(_loadLyrics(track));
+                                              }
+                                            },
+                                            child: Text(
+                                              _showLyrics
+                                                  ? 'Up Next'
+                                                  : 'Lyrics',
                                             ),
-                                            SizedBox(width: 10),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    track.title,
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      fontFamily: 'DMSansBold',
-                                                    ),
-                                                  ),
-                                                  Text(
-                                                    track.artist,
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: TextStyle(
-                                                      color: C.muted,
-                                                      fontSize: 10,
-                                                    ),
-                                                  ),
-                                                ],
+                                          ),
+                                          if (_showLyrics) ...[
+                                            IconButton(
+                                              tooltip: 'Refresh lyrics',
+                                              onPressed: () => _loadLyrics(
+                                                track,
+                                                refresh: true,
                                               ),
+                                              icon: Icon(Icons.refresh_rounded),
                                             ),
-                                            Icon(
-                                              Icons.graphic_eq_rounded,
-                                              color: C.lime,
-                                              size: 17,
+                                            IconButton(
+                                              tooltip: 'Close lyrics',
+                                              onPressed: () => _updateState(
+                                                () => _showLyrics = false,
+                                              ),
+                                              icon: Icon(Icons.close_rounded),
+                                            ),
+                                          ] else ...[
+                                            IconButton(
+                                              tooltip: 'Close Up Next',
+                                              onPressed: () => _updateState(
+                                                () => _showUpNext = false,
+                                              ),
+                                              icon: Icon(Icons.close_rounded),
+                                            ),
+                                            TextButton(
+                                              onPressed: _clearUpcoming,
+                                              child: Text('Clear'),
                                             ),
                                           ],
-                                        ),
+                                        ],
                                       ),
-                                      SizedBox(height: 22),
-                                      Text(
-                                        'NEXT IN QUEUE',
-                                        style: TextStyle(
-                                          color: C.muted,
-                                          fontSize: 10,
-                                          letterSpacing: 1.1,
+                                      if (_showLyrics) ...[
+                                        Text(
+                                          '${track.title} · ${track.artist}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: C.muted,
+                                            fontSize: 11,
+                                          ),
                                         ),
-                                      ),
-                                      SizedBox(height: 8),
-                                      Expanded(
-                                        child: ListView.builder(
-                                          itemCount: math.min(
-                                            30,
-                                            math.max(
-                                              0,
-                                              _queue.length - _queueIndex - 1,
+                                        SizedBox(height: 12),
+                                        _lyricsPanelContent(track),
+                                      ] else ...[
+                                        SizedBox(height: 8),
+                                        Text(
+                                          'NOW PLAYING',
+                                          style: TextStyle(
+                                            color: C.muted,
+                                            fontSize: 10,
+                                            letterSpacing: 1.1,
+                                          ),
+                                        ),
+                                        SizedBox(height: 10),
+                                        Container(
+                                          padding: EdgeInsets.all(10),
+                                          decoration: BoxDecoration(
+                                            color: C.surface,
+                                            borderRadius: BorderRadius.circular(
+                                              10,
                                             ),
                                           ),
-                                          itemBuilder: (context, index) =>
-                                              _trackRow(
-                                                _queue[_queueIndex + index + 1],
-                                                _queueIndex + index + 1,
+                                          child: Row(
+                                            children: [
+                                              ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(5),
+                                                child: _artwork(
+                                                  track.coverArt,
+                                                  localArtworkPath:
+                                                      track.localArtworkPath,
+                                                  size: 42,
+                                                  seed: track.album,
+                                                ),
                                               ),
+                                              SizedBox(width: 10),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      track.title,
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        fontFamily:
+                                                            'DMSansBold',
+                                                      ),
+                                                    ),
+                                                    Text(
+                                                      track.artist,
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: TextStyle(
+                                                        color: C.muted,
+                                                        fontSize: 10,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              Icon(
+                                                Icons.graphic_eq_rounded,
+                                                color: C.lime,
+                                                size: 17,
+                                              ),
+                                            ],
+                                          ),
                                         ),
-                                      ),
+                                        SizedBox(height: 22),
+                                        Text(
+                                          'NEXT IN QUEUE',
+                                          style: TextStyle(
+                                            color: C.muted,
+                                            fontSize: 10,
+                                            letterSpacing: 1.1,
+                                          ),
+                                        ),
+                                        SizedBox(height: 8),
+                                        Expanded(
+                                          child: ListView.builder(
+                                            itemCount: math.min(
+                                              30,
+                                              math.max(
+                                                0,
+                                                _queue.length - _queueIndex - 1,
+                                              ),
+                                            ),
+                                            itemBuilder: (context, index) =>
+                                                _trackRow(
+                                                  _queue[_queueIndex +
+                                                      index +
+                                                      1],
+                                                  _queueIndex + index + 1,
+                                                ),
+                                          ),
+                                        ),
+                                      ],
                                     ],
                                   ),
                                 ),
@@ -490,102 +578,55 @@ extension _PlayerUiMethods on _HomeScreenState {
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceBetween,
                                         children: [
-                                          IconButton(
+                                          _playbackControlButton(
+                                            icon: Icons.shuffle_rounded,
                                             tooltip: 'Shuffle',
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            constraints: BoxConstraints(
-                                              minWidth: 40,
-                                              minHeight: 40,
-                                            ),
                                             onPressed: _toggleShuffle,
-                                            icon: Icon(
-                                              Icons.shuffle_rounded,
-                                              color: _shuffle
-                                                  ? C.lime
-                                                  : C.muted,
-                                            ),
+                                            active: _shuffle,
+                                            buttonSize: 42,
                                           ),
-                                          IconButton(
+                                          _playbackControlButton(
+                                            icon: Icons.skip_previous_rounded,
                                             tooltip: 'Previous track',
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            constraints: BoxConstraints(
-                                              minWidth: 40,
-                                              minHeight: 40,
-                                            ),
                                             onPressed: () => _skip(-1),
-                                            icon: Icon(
-                                              Icons.skip_previous_rounded,
-                                              size: 26,
-                                            ),
+                                            iconSize: 26,
+                                            buttonSize: 42,
                                           ),
-                                          InkWell(
-                                            borderRadius: BorderRadius.circular(
-                                              40,
-                                            ),
-                                            onTap: _togglePlayback,
-                                            child: Semantics(
-                                              button: true,
-                                              label: _player.playing
-                                                  ? 'Pause'
-                                                  : 'Play',
-                                              child: Container(
-                                                width: 50,
-                                                height: 50,
-                                                decoration: BoxDecoration(
-                                                  color: C.lime,
-                                                  shape: BoxShape.circle,
-                                                ),
-                                                child: Icon(
-                                                  _player.playing
-                                                      ? Icons.pause_rounded
-                                                      : Icons
-                                                            .play_arrow_rounded,
-                                                  color: C.black,
-                                                  size: 25,
-                                                ),
-                                              ),
-                                            ),
+                                          _playbackControlButton(
+                                            icon: _player.playing
+                                                ? Icons.pause_rounded
+                                                : Icons.play_arrow_rounded,
+                                            tooltip: _player.playing
+                                                ? 'Pause'
+                                                : 'Play',
+                                            onPressed: _togglePlayback,
+                                            primary: true,
+                                            buttonSize: 54,
+                                            iconSize: 28,
                                           ),
-                                          IconButton(
+                                          _playbackControlButton(
+                                            icon: Icons.skip_next_rounded,
                                             tooltip: 'Next track',
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            constraints: BoxConstraints(
-                                              minWidth: 40,
-                                              minHeight: 40,
-                                            ),
                                             onPressed: () => _skip(1),
-                                            icon: Icon(
-                                              Icons.skip_next_rounded,
-                                              size: 26,
-                                            ),
+                                            iconSize: 26,
+                                            buttonSize: 42,
                                           ),
-                                          IconButton(
+                                          _playbackControlButton(
+                                            icon: Icons.repeat_rounded,
                                             tooltip: 'Repeat mode',
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            constraints: BoxConstraints(
-                                              minWidth: 40,
-                                              minHeight: 40,
-                                            ),
                                             onPressed: _cycleRepeatMode,
-                                            icon: Icon(
-                                              Icons.repeat_rounded,
-                                              color: (_repeatAll || _repeatOne)
-                                                  ? C.lime
-                                                  : C.muted,
-                                            ),
+                                            active: _repeatAll || _repeatOne,
+                                            buttonSize: 42,
                                           ),
                                         ],
                                       ),
                                       Align(
                                         alignment: Alignment.centerLeft,
                                         child: OutlinedButton.icon(
-                                          onPressed: () => _updateState(
-                                            () => _showUpNext = true,
-                                          ),
+                                          onPressed: () => _updateState(() {
+                                            _showUpNext = true;
+                                            _showLyrics = false;
+                                          }),
                                           icon: Icon(Icons.queue_music_rounded),
                                           label: Text(
                                             'Up Next · ${_queue.length - _queueIndex - 1}',
@@ -601,7 +642,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                         );
                       }
 
-                      if (_showUpNext) {
+                      if (_showUpNext || _showLyrics) {
                         final firstIndex = _queueIndex + 1;
                         final upcomingCount = math.min(
                           100,
@@ -615,119 +656,173 @@ extension _PlayerUiMethods on _HomeScreenState {
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      'Up next',
+                                      _showLyrics ? 'Lyrics' : 'Up next',
                                       style: const TextStyle(
                                         fontFamily: 'SyneBold',
                                         fontSize: 22,
                                       ),
                                     ),
                                   ),
-                                  IconButton(
-                                    tooltip: 'Close Up Next',
-                                    onPressed: () =>
-                                        _updateState(() => _showUpNext = false),
-                                    icon: const Icon(Icons.close_rounded),
-                                  ),
-                                  PopupMenuButton<String>(
-                                    onSelected: (value) {
-                                      if (value == 'clear') _clearUpcoming();
-                                      if (value == 'save') {
-                                        _saveQueueAsPlaylist();
+                                  TextButton(
+                                    onPressed: () {
+                                      final showLyrics = !_showLyrics;
+                                      _updateState(() {
+                                        _showLyrics = showLyrics;
+                                        _showUpNext = !showLyrics;
+                                      });
+                                      if (showLyrics) {
+                                        unawaited(_loadLyrics(track));
                                       }
                                     },
-                                    itemBuilder: (_) => const [
-                                      PopupMenuItem(
-                                        value: 'clear',
-                                        child: Text('Clear upcoming tracks'),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'save',
-                                        child: Text('Save queue as playlist'),
-                                      ),
-                                    ],
-                                    icon: const Icon(Icons.more_vert_rounded),
+                                    child: Text(
+                                      _showLyrics ? 'Up Next' : 'Lyrics',
+                                    ),
                                   ),
+                                  if (_showLyrics) ...[
+                                    IconButton(
+                                      tooltip: 'Refresh lyrics',
+                                      onPressed: () =>
+                                          _loadLyrics(track, refresh: true),
+                                      icon: const Icon(Icons.refresh_rounded),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Close lyrics',
+                                      onPressed: () => _updateState(
+                                        () => _showLyrics = false,
+                                      ),
+                                      icon: const Icon(Icons.close_rounded),
+                                    ),
+                                  ] else ...[
+                                    IconButton(
+                                      tooltip: 'Close Up Next',
+                                      onPressed: () => _updateState(() {
+                                        _showUpNext = false;
+                                        _showLyrics = false;
+                                      }),
+                                      icon: const Icon(Icons.close_rounded),
+                                    ),
+                                    PopupMenuButton<String>(
+                                      onSelected: (value) {
+                                        if (value == 'clear') _clearUpcoming();
+                                        if (value == 'save') {
+                                          _saveQueueAsPlaylist();
+                                        }
+                                      },
+                                      itemBuilder: (_) => const [
+                                        PopupMenuItem(
+                                          value: 'clear',
+                                          child: Text('Clear upcoming tracks'),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'save',
+                                          child: Text('Save queue as playlist'),
+                                        ),
+                                      ],
+                                      icon: const Icon(Icons.more_vert_rounded),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
-                            Expanded(
-                              child: ListView.builder(
-                                itemCount: upcomingCount,
-                                itemExtent: 68,
+                            if (_showLyrics) ...[
+                              Padding(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 22,
                                 ),
-                                itemBuilder: (context, index) {
-                                  final queueIndex = firstIndex + index;
-                                  final queuedTrack = _queue[queueIndex];
-                                  return ListTile(
-                                    dense: true,
-                                    contentPadding: EdgeInsets.zero,
-                                    leading: _artwork(
-                                      queuedTrack.coverArt,
-                                      localArtworkPath:
-                                          queuedTrack.localArtworkPath,
-                                      size: 42,
-                                      seed: queuedTrack.album,
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    '${track.title} · ${track.artist}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: C.muted,
+                                      fontSize: 11,
                                     ),
-                                    title: Text(
-                                      queuedTrack.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    subtitle: Text(
-                                      '${queuedTrack.artist} · ${queuedTrack.album}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    onTap: () => _play(queuedTrack),
-                                    trailing: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        IconButton(
-                                          tooltip: 'Move up',
-                                          onPressed:
-                                              queueIndex > _queueIndex + 1
-                                              ? () => _moveQueueItem(
-                                                  queueIndex,
-                                                  queueIndex - 1,
-                                                )
-                                              : null,
-                                          icon: const Icon(
-                                            Icons.arrow_upward_rounded,
-                                            size: 17,
-                                          ),
-                                        ),
-                                        IconButton(
-                                          tooltip: 'Move down',
-                                          onPressed:
-                                              queueIndex < _queue.length - 1
-                                              ? () => _moveQueueItem(
-                                                  queueIndex,
-                                                  queueIndex + 1,
-                                                )
-                                              : null,
-                                          icon: const Icon(
-                                            Icons.arrow_downward_rounded,
-                                            size: 17,
-                                          ),
-                                        ),
-                                        IconButton(
-                                          tooltip: 'Remove from queue',
-                                          onPressed: () =>
-                                              _removeFromQueue(queueIndex),
-                                          icon: const Icon(
-                                            Icons.close_rounded,
-                                            size: 18,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
+                                  ),
+                                ),
                               ),
-                            ),
-                            if (upcomingCount == 0)
+                              const SizedBox(height: 12),
+                              _lyricsPanelContent(track),
+                            ] else
+                              Expanded(
+                                child: ListView.builder(
+                                  itemCount: upcomingCount,
+                                  itemExtent: 68,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 22,
+                                  ),
+                                  itemBuilder: (context, index) {
+                                    final queueIndex = firstIndex + index;
+                                    final queuedTrack = _queue[queueIndex];
+                                    return ListTile(
+                                      dense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                      leading: _artwork(
+                                        queuedTrack.coverArt,
+                                        localArtworkPath:
+                                            queuedTrack.localArtworkPath,
+                                        size: 42,
+                                        seed: queuedTrack.album,
+                                      ),
+                                      title: Text(
+                                        queuedTrack.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      subtitle: Text(
+                                        '${queuedTrack.artist} · ${queuedTrack.album}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      onTap: () => _play(queuedTrack),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            tooltip: 'Move up',
+                                            onPressed:
+                                                queueIndex > _queueIndex + 1
+                                                ? () => _moveQueueItem(
+                                                    queueIndex,
+                                                    queueIndex - 1,
+                                                  )
+                                                : null,
+                                            icon: const Icon(
+                                              Icons.arrow_upward_rounded,
+                                              size: 17,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Move down',
+                                            onPressed:
+                                                queueIndex < _queue.length - 1
+                                                ? () => _moveQueueItem(
+                                                    queueIndex,
+                                                    queueIndex + 1,
+                                                  )
+                                                : null,
+                                            icon: const Icon(
+                                              Icons.arrow_downward_rounded,
+                                              size: 17,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Remove from queue',
+                                            onPressed: () =>
+                                                _removeFromQueue(queueIndex),
+                                            icon: const Icon(
+                                              Icons.close_rounded,
+                                              size: 18,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            if (!_showLyrics && upcomingCount == 0)
                               const Padding(
                                 padding: EdgeInsets.symmetric(vertical: 14),
                                 child: Text("You're at the end of the queue."),
@@ -741,7 +836,7 @@ extension _PlayerUiMethods on _HomeScreenState {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (_showUpNext) ...[
+                            if (_showUpNext || _showLyrics) ...[
                               Row(
                                 children: [
                                   Expanded(
@@ -964,85 +1059,47 @@ extension _PlayerUiMethods on _HomeScreenState {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                IconButton(
+                                _playbackControlButton(
+                                  icon: Icons.shuffle_rounded,
                                   tooltip: 'Shuffle',
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: BoxConstraints(
-                                    minWidth: 40,
-                                    minHeight: 40,
-                                  ),
                                   onPressed: _toggleShuffle,
-                                  icon: Icon(
-                                    Icons.shuffle_rounded,
-                                    color: _shuffle ? C.lime : C.muted,
-                                    size: 21,
-                                  ),
+                                  active: _shuffle,
+                                  buttonSize: 42,
                                 ),
-                                IconButton(
+                                _playbackControlButton(
+                                  icon: Icons.skip_previous_rounded,
                                   tooltip: 'Previous track',
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: BoxConstraints(
-                                    minWidth: 40,
-                                    minHeight: 40,
-                                  ),
                                   onPressed: () => _skip(-1),
-                                  icon: Icon(
-                                    Icons.skip_previous_rounded,
-                                    size: 27,
-                                  ),
+                                  iconSize: 27,
+                                  buttonSize: 42,
                                 ),
-                                InkWell(
-                                  borderRadius: BorderRadius.circular(40),
-                                  onTap: _togglePlayback,
-                                  child: Semantics(
-                                    button: true,
-                                    label: _player.playing ? 'Pause' : 'Play',
-                                    child: Container(
-                                      width: 52,
-                                      height: 52,
-                                      decoration: BoxDecoration(
-                                        color: C.lime,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(
-                                        _player.playing
-                                            ? Icons.pause_rounded
-                                            : Icons.play_arrow_rounded,
-                                        color: C.black,
-                                        size: 26,
-                                      ),
-                                    ),
-                                  ),
+                                _playbackControlButton(
+                                  icon: _player.playing
+                                      ? Icons.pause_rounded
+                                      : Icons.play_arrow_rounded,
+                                  tooltip: _player.playing ? 'Pause' : 'Play',
+                                  onPressed: _togglePlayback,
+                                  primary: true,
+                                  buttonSize: 56,
+                                  iconSize: 29,
                                 ),
-                                IconButton(
+                                _playbackControlButton(
+                                  icon: Icons.skip_next_rounded,
                                   tooltip: 'Next track',
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: BoxConstraints(
-                                    minWidth: 40,
-                                    minHeight: 40,
-                                  ),
                                   onPressed: () => _skip(1),
-                                  icon: Icon(Icons.skip_next_rounded, size: 27),
+                                  iconSize: 27,
+                                  buttonSize: 42,
                                 ),
-                                IconButton(
+                                _playbackControlButton(
+                                  icon: Icons.repeat_rounded,
                                   tooltip: _repeatOne
                                       ? 'Repeat one'
                                       : _repeatAll
                                       ? 'Repeat all'
                                       : 'Repeat off',
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: BoxConstraints(
-                                    minWidth: 40,
-                                    minHeight: 40,
-                                  ),
                                   onPressed: _cycleRepeatMode,
-                                  icon: Icon(
-                                    Icons.repeat_rounded,
-                                    color: (_repeatAll || _repeatOne)
-                                        ? C.lime
-                                        : C.muted,
-                                    size: 21,
-                                  ),
+                                  active: _repeatAll || _repeatOne,
+                                  buttonSize: 42,
                                 ),
                               ],
                             ),

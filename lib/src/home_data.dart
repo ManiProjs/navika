@@ -45,6 +45,9 @@ extension _HomeDataMethods on _HomeScreenState {
     }
     _handlingCompletion = true;
     try {
+      if (_flowActive && _queueIndex >= _queue.length - 1) {
+        await _appendFlowBatch();
+      }
       if (_shuffle && _queue.length > 1) {
         await _skip(1);
       } else if (_queueIndex < _queue.length - 1) {
@@ -157,6 +160,7 @@ extension _HomeDataMethods on _HomeScreenState {
       _showFlow ||
       _showVisualizer ||
       _showUpNext ||
+      _showLyrics ||
       _showPlayer ||
       _showSettings ||
       _showLogin ||
@@ -175,8 +179,11 @@ extension _HomeDataMethods on _HomeScreenState {
       });
     } else if (_showVisualizer) {
       _updateState(() => _showVisualizer = false);
-    } else if (_showUpNext) {
-      _updateState(() => _showUpNext = false);
+    } else if (_showUpNext || _showLyrics) {
+      _updateState(() {
+        _showUpNext = false;
+        _showLyrics = false;
+      });
     } else if (_showPlayer) {
       _updateState(() => _showPlayer = false);
     } else if (_showSettings) {
@@ -298,6 +305,118 @@ extension _HomeDataMethods on _HomeScreenState {
     return artists.take(5).toList();
   }
 
+  List<
+    ({
+      String id,
+      String title,
+      String description,
+      IconData icon,
+      List<MusicTrack> tracks,
+    })
+  >
+  get _smartPlaylists {
+    final library = _modeTracks;
+    if (library.isEmpty) return const [];
+    final byId = {for (final track in library) track.id: track};
+    final playCounts = <String, int>{};
+    final lastPlayed = <String, int>{};
+    for (final event in _history) {
+      if (!byId.containsKey(event.id)) continue;
+      playCounts.update(event.id, (count) => count + 1, ifAbsent: () => 1);
+      lastPlayed[event.id] = math.max(
+        lastPlayed[event.id] ?? 0,
+        event.playedAt,
+      );
+    }
+    final recent = <MusicTrack>[];
+    final recentSeen = <String>{};
+    for (final event in _history.reversed) {
+      final track = byId[event.id];
+      if (track != null && recentSeen.add(track.id)) recent.add(track);
+      if (recent.length == 50) break;
+    }
+    final mostPlayed = playCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final neverPlayed = library
+        .where((track) => !playCounts.containsKey(track.id))
+        .toList();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final thirtyDaysAgo = now - const Duration(days: 30).inMilliseconds;
+    final forgottenFavorites = _favorites
+        .map((id) => byId[id])
+        .whereType<MusicTrack>()
+        .where((track) => (lastPlayed[track.id] ?? 0) < thirtyDaysAgo)
+        .toList();
+    final shortTracks = library
+        .where((track) => track.duration > 0 && track.duration <= 180)
+        .toList();
+
+    final result =
+        <
+          ({
+            String id,
+            String title,
+            String description,
+            IconData icon,
+            List<MusicTrack> tracks,
+          })
+        >[];
+    void add(
+      String id,
+      String title,
+      String description,
+      IconData icon,
+      List<MusicTrack> tracks,
+    ) {
+      if (tracks.isNotEmpty) {
+        result.add((
+          id: id,
+          title: title,
+          description: description,
+          icon: icon,
+          tracks: tracks,
+        ));
+      }
+    }
+
+    add(
+      'recently-played',
+      'Recently played',
+      'Your latest listening, in order',
+      Icons.history_rounded,
+      recent,
+    );
+    add(
+      'most-played',
+      'Most played',
+      'The tracks you return to most',
+      Icons.trending_up_rounded,
+      mostPlayed.take(50).map((entry) => byId[entry.key]!).toList(),
+    );
+    add(
+      'never-played',
+      'Never played',
+      'A fresh corner of your library',
+      Icons.fiber_new_rounded,
+      neverPlayed,
+    );
+    add(
+      'forgotten-favorites',
+      'Forgotten favorites',
+      'Favorites you have not played in 30 days',
+      Icons.bookmark_border_rounded,
+      forgottenFavorites,
+    );
+    add(
+      'short-and-sweet',
+      'Short & sweet',
+      'Tracks under three minutes',
+      Icons.bolt_rounded,
+      shortTracks,
+    );
+    return result;
+  }
+
   Future<void> _restore() async {
     final preferences = await SharedPreferences.getInstance();
     final restoreWarnings = <String>[];
@@ -315,15 +434,51 @@ extension _HomeDataMethods on _HomeScreenState {
     _repeatAll = preferences.getBool(_repeatAllKey) ?? false;
     _repeatOne = preferences.getBool(_repeatOneKey) ?? false;
     _playbackSpeed = preferences.getDouble(_speedKey) ?? 1.0;
+    _replayGainEnabled = preferences.getBool(_replayGainEnabledKey) ?? true;
+    _replayGainAlbumMode = preferences.getBool(_replayGainAlbumKey) ?? false;
+    _replayGainPreampDb = (preferences.getDouble(_replayGainPreampKey) ?? 0)
+        .clamp(-6.0, 6.0)
+        .toDouble();
+    final savedFlowPreferences = preferences.getString(_flowPreferencesKey);
+    if (savedFlowPreferences != null) {
+      try {
+        final values = Map<String, dynamic>.from(
+          jsonDecode(savedFlowPreferences) as Map,
+        );
+        _flowFamiliarity = ((values['familiarity'] as num?) ?? .62)
+            .toDouble()
+            .clamp(0.0, 1.0)
+            .toDouble();
+        _flowVariety = ((values['variety'] as num?) ?? .68)
+            .toDouble()
+            .clamp(0.0, 1.0)
+            .toDouble();
+      } catch (_) {
+        await preferences.remove(_flowPreferencesKey);
+      }
+    }
+    final savedArtistFeedback = preferences.getString(_flowArtistFeedbackKey);
+    if (savedArtistFeedback != null) {
+      try {
+        _tasteArtistFeedback.addAll(
+          Map<String, dynamic>.from(jsonDecode(savedArtistFeedback) as Map).map(
+            (key, value) =>
+                MapEntry(key, (value as num).toInt().clamp(-2, 2).toInt()),
+          ),
+        );
+      } catch (_) {
+        await preferences.remove(_flowArtistFeedbackKey);
+      }
+    }
     final savedTaste = preferences.getString(_tasteProfileKey);
     if (savedTaste != null) {
       try {
         final decoded = Map<String, dynamic>.from(
           jsonDecode(savedTaste) as Map,
         );
-        // Older builds incorrectly turned song feedback into artist feedback.
-        // Ignore that legacy map so disliking one song never penalizes its artist.
-        _tasteArtistFeedback.clear();
+        // Artist preferences now live in their own versioned key. Ignore the
+        // legacy artists map in this profile because older builds mixed up
+        // song and artist feedback there.
         _tasteTrackFeedback
           ..clear()
           ..addAll(
@@ -379,6 +534,12 @@ extension _HomeDataMethods on _HomeScreenState {
     _flowHiddenTrackIds.addAll(
       preferences.getStringList(_flowHiddenTracksKey) ?? const [],
     );
+    _flowExcludedTrackIds.addAll(
+      preferences.getStringList(_flowExcludedTracksKey) ?? const [],
+    );
+    _flowProtectedTrackIds.addAll(
+      preferences.getStringList(_flowProtectedTracksKey) ?? const [],
+    );
     final savedQueue = preferences.getString(_queueKey);
     if (savedQueue != null) {
       try {
@@ -391,6 +552,31 @@ extension _HomeDataMethods on _HomeScreenState {
             .toList();
       } catch (_) {
         await preferences.remove(_queueKey);
+      }
+    }
+    final savedFlowSession = preferences.getString(_flowSessionKey);
+    if (savedFlowSession != null) {
+      try {
+        final session = Map<String, dynamic>.from(
+          jsonDecode(savedFlowSession) as Map,
+        );
+        _flowActive = session['active'] == true;
+        _flowResumeTrackId = session['currentId'] as String?;
+        _flowResumePositionMillis = ((session['positionMs'] as num?) ?? 0)
+            .toInt()
+            .clamp(0, 1 << 31)
+            .toInt();
+        _flowSessionPlayedIds.addAll(
+          (session['playedIds'] as List<dynamic>? ?? const [])
+              .whereType<String>(),
+        );
+        _queueIndex = ((session['queueIndex'] as num?) ?? 0)
+            .toInt()
+            .clamp(0, math.max(0, _queue.length - 1))
+            .toInt();
+        if (_flowActive) _flowPage = 1;
+      } catch (_) {
+        await preferences.remove(_flowSessionKey);
       }
     }
 
@@ -914,8 +1100,13 @@ finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
     String? title;
     String? artist;
     String? album;
+    String? genre;
     int duration = 0;
     String? artworkPath;
+    double? trackGainDb;
+    double? albumGainDb;
+    double? trackPeak;
+    double? albumPeak;
     int? modifiedMillis;
 
     if (!isContentUri) {
@@ -950,7 +1141,12 @@ finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
       }
       artist = (metadata['artist'] as String?)?.trim();
       album = (metadata['album'] as String?)?.trim();
+      genre = (metadata['genre'] as String?)?.trim();
       duration = (metadata['duration'] as int?) ?? 0;
+      trackGainDb = (metadata['trackGainDb'] as num?)?.toDouble();
+      albumGainDb = (metadata['albumGainDb'] as num?)?.toDouble();
+      trackPeak = (metadata['trackPeak'] as num?)?.toDouble();
+      albumPeak = (metadata['albumPeak'] as num?)?.toDouble();
 
       final artwork = metadata['artwork'];
       if (artwork is List<int> && artwork.isNotEmpty) {
@@ -978,7 +1174,12 @@ finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
           : (fallbackTitle.isEmpty ? fileName : fallbackTitle),
       artist: artist?.isNotEmpty == true ? artist! : 'Unknown artist',
       album: album?.isNotEmpty == true ? album! : 'Unknown album',
+      genre: genre ?? '',
       duration: duration,
+      trackGainDb: trackGainDb,
+      albumGainDb: albumGainDb,
+      trackPeak: trackPeak,
+      albumPeak: albumPeak,
       localPath: path,
       localArtworkPath: artworkPath,
       localMetadataRead: true,

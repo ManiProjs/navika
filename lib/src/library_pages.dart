@@ -3,6 +3,7 @@ part of '../main.dart';
 extension _LibraryPageMethods on _HomeScreenState {
   Widget _playlistsPage() {
     final allTracksById = _allTracksById;
+    final smartPlaylists = _smartPlaylists;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -28,6 +29,75 @@ extension _LibraryPageMethods on _HomeScreenState {
             onTap: _importLocalMusic,
           )
         else ...[
+          if (smartPlaylists.isNotEmpty) ...[
+            Text(
+              'SMART PLAYLISTS',
+              style: TextStyle(
+                color: C.muted,
+                fontFamily: 'DMSansBold',
+                fontSize: 10,
+                letterSpacing: 1.2,
+              ),
+            ),
+            SizedBox(height: 10),
+            ...smartPlaylists.map((playlist) {
+              void play() =>
+                  _play(playlist.tracks.first, playlist: playlist.tracks);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Material(
+                  color: C.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    onTap: play,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(playlist.icon, color: C.lime, size: 22),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  playlist.title,
+                                  style: TextStyle(
+                                    fontFamily: 'DMSansBold',
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                SizedBox(height: 3),
+                                Text(
+                                  '${playlist.description} · ${playlist.tracks.length} tracks',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: C.muted,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Play ${playlist.title}',
+                            onPressed: play,
+                            icon: Icon(Icons.play_arrow_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+            SizedBox(height: 16),
+          ],
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(

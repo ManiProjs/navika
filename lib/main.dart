@@ -9,13 +9,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
+import 'package:audio_service/audio_service.dart';
 import 'package:crypto/crypto.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:just_audio_background/just_audio_background.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'navidrome_client.dart';
+import 'navika_audio_handler.dart';
+import 'lyrics_service.dart';
 
 part 'src/app_widgets.dart';
 part 'src/home_data.dart';
@@ -30,9 +32,28 @@ part 'src/settings.dart';
 part 'src/flow_ui.dart';
 part 'src/player_ui.dart';
 part 'src/shared_widgets.dart';
+part 'src/lyrics.dart';
 
 Future<void> _audioServiceReady = Future<void>.value();
 bool _audioServiceInitializationRequired = false;
+final AudioPlayer _sharedPlayer = AudioPlayer();
+NavikaAudioHandler? _audioHandler;
+Future<void> Function(String trackId)? _audioSelectTrack;
+Future<void> Function(int direction)? _audioSkipTrack;
+
+MediaItem _mediaItemForTrack(MusicTrack track, NavidromeClient? client) =>
+    MediaItem(
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      duration: Duration(seconds: track.duration),
+      artUri: track.localArtworkPath != null
+          ? Uri.file(track.localArtworkPath!)
+          : (client?.coverArtUrl(track.coverArt) == null
+                ? null
+                : Uri.parse(client!.coverArtUrl(track.coverArt)!)),
+    );
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,13 +61,32 @@ void main() {
       defaultTargetPlatform == TargetPlatform.iOS) {
     _audioServiceInitializationRequired = true;
     _audioServiceReady =
-        JustAudioBackground.init(
-          androidNotificationChannelId: 'app.navika.audio',
-          androidNotificationChannelName: 'Navika playback',
-          androidNotificationOngoing: true,
-        ).catchError((Object error, StackTrace stackTrace) {
-          debugPrint('Navika audio service initialization failed: $error');
-        });
+        AudioService.init<NavikaAudioHandler>(
+              builder: () => NavikaAudioHandler(
+                _sharedPlayer,
+                (id) async => _audioSelectTrack?.call(id),
+                (direction) async => _audioSkipTrack?.call(direction),
+              ),
+              config: AudioServiceConfig(
+                androidNotificationChannelId: 'app.navika.audio',
+                androidNotificationChannelName: 'Navika playback',
+                androidNotificationOngoing: true,
+                androidStopForegroundOnPause: false,
+                androidBrowsableRootExtras: const {
+                  AndroidContentStyle.supportedKey: true,
+                  AndroidContentStyle.browsableHintKey:
+                      AndroidContentStyle.categoryListItemHintValue,
+                  AndroidContentStyle.playableHintKey:
+                      AndroidContentStyle.listItemHintValue,
+                },
+              ),
+            )
+            .then((handler) {
+              _audioHandler = handler;
+            })
+            .catchError((Object error, StackTrace stackTrace) {
+              debugPrint('Navika audio service initialization failed: $error');
+            });
   }
   // Render Flutter's first frame immediately instead of keeping Android's
   // launch screen up while audio_service initializes.
@@ -104,25 +144,104 @@ const _queueKey = 'navika.playback.queue';
 const _recommendationFeedbackKey = 'navika.recommendations.dismissed';
 const _tasteProfileKey = 'navika.taste-profile.v1';
 const _flowHiddenTracksKey = 'navika.flow.hidden-tracks.v1';
+const _flowPreferencesKey = 'navika.flow.preferences.v1';
+const _flowArtistFeedbackKey = 'navika.flow.artist-feedback.v1';
+const _flowExcludedTracksKey = 'navika.flow.excluded-tracks.v1';
+const _flowProtectedTracksKey = 'navika.flow.protected-tracks.v1';
+const _flowSessionKey = 'navika.flow.session.v1';
 const _librarySourceKey = 'navika.library-source.v1';
 const _speedKey = 'navika.playback.speed';
+const _replayGainEnabledKey = 'navika.playback.replay-gain.enabled';
+const _replayGainAlbumKey = 'navika.playback.replay-gain.album-mode';
+const _replayGainPreampKey = 'navika.playback.replay-gain.preamp';
 const _localTracksKey = 'navika.local.tracks';
 const _localFoldersKey = 'navika.local.folders';
 const _androidLocalFolders = MethodChannel('app.navika/local_folders');
 Map<String, Object?> _readEmbeddedMetadata(String path) {
-  final metadata = readMetadata(File(path), getImage: true);
-  final frontCover = metadata.pictures.where(
+  double? trackGainDb;
+  double? albumGainDb;
+  double? trackPeak;
+  double? albumPeak;
+  String? title;
+  String? artist;
+  String? album;
+  String genre = '';
+  int? duration;
+  List<Picture> pictures = [];
+  final extension = path.split('.').last.toLowerCase();
+  if (const {'flac', 'ogg', 'oga', 'opus', 'mp3', 'mp2'}.contains(extension)) {
+    final fullMetadata = readAllMetadata(File(path), getImage: true);
+    if (fullMetadata is VorbisMetadata) {
+      title = fullMetadata.title.firstOrNull;
+      artist =
+          fullMetadata.artist.firstOrNull ??
+          fullMetadata.albumArtist.firstOrNull;
+      album = fullMetadata.album.firstOrNull;
+      genre = fullMetadata.genres.firstOrNull ?? '';
+      duration = fullMetadata.duration?.inSeconds;
+      pictures = fullMetadata.pictures;
+      trackGainDb = parseReplayGainDb(
+        fullMetadata.replayGainTrackGain.firstOrNull,
+      );
+      albumGainDb = parseReplayGainDb(
+        fullMetadata.replayGainAlbumGain.firstOrNull,
+      );
+      trackPeak = parseReplayGainDb(
+        fullMetadata.replayGainTrackPeak.firstOrNull,
+      );
+      albumPeak = parseReplayGainDb(
+        fullMetadata.replayGainAlbumPeak.firstOrNull,
+      );
+    } else if (fullMetadata is Mp3Metadata) {
+      title = fullMetadata.songName;
+      artist = fullMetadata.leadPerformer ?? fullMetadata.bandOrOrchestra;
+      album = fullMetadata.album;
+      genre = fullMetadata.genres.firstOrNull ?? '';
+      duration = fullMetadata.duration?.inSeconds;
+      pictures = fullMetadata.pictures;
+      String? tag(String name) => fullMetadata.customMetadata.entries
+          .where((entry) => entry.key.toLowerCase() == name.toLowerCase())
+          .map((entry) => entry.value)
+          .firstOrNull;
+      trackGainDb = parseReplayGainDb(tag('REPLAYGAIN_TRACK_GAIN'));
+      albumGainDb = parseReplayGainDb(tag('REPLAYGAIN_ALBUM_GAIN'));
+      trackPeak = parseReplayGainDb(tag('REPLAYGAIN_TRACK_PEAK'));
+      albumPeak = parseReplayGainDb(tag('REPLAYGAIN_ALBUM_PEAK'));
+    } else {
+      final metadata = readMetadata(File(path), getImage: true);
+      title = metadata.title;
+      artist = metadata.artist ?? metadata.albumArtist;
+      album = metadata.album;
+      genre = metadata.genres.firstOrNull ?? '';
+      duration = metadata.duration?.inSeconds;
+      pictures = metadata.pictures;
+    }
+  } else {
+    final metadata = readMetadata(File(path), getImage: true);
+    title = metadata.title;
+    artist = metadata.artist ?? metadata.albumArtist;
+    album = metadata.album;
+    genre = metadata.genres.firstOrNull ?? '';
+    duration = metadata.duration?.inSeconds;
+    pictures = metadata.pictures;
+  }
+  final frontCover = pictures.where(
     (picture) => picture.pictureType == PictureType.coverFront,
   );
   final picture = frontCover.isNotEmpty
       ? frontCover.first
-      : (metadata.pictures.isEmpty ? null : metadata.pictures.first);
+      : (pictures.isEmpty ? null : pictures.first);
   return {
-    'title': metadata.title,
-    'artist': metadata.artist ?? metadata.albumArtist,
-    'album': metadata.album,
-    'duration': metadata.duration?.inSeconds,
+    'title': title,
+    'artist': artist,
+    'album': album,
+    'genre': genre,
+    'duration': duration,
     'artwork': picture?.bytes,
+    'trackGainDb': trackGainDb,
+    'albumGainDb': albumGainDb,
+    'trackPeak': trackPeak,
+    'albumPeak': albumPeak,
   };
 }
 
@@ -179,7 +298,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _player = _sharedPlayer;
   final ValueNotifier<Duration> _position = ValueNotifier(Duration.zero);
   final ValueNotifier<bool> _isPlaying = ValueNotifier(false);
   final ValueNotifier<MusicTrack?> _currentTrackNotifier = ValueNotifier(null);
@@ -209,7 +328,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, int> _tasteArtistFeedback = {};
   final Map<String, int> _tasteTrackFeedback = {};
   final Set<String> _flowHiddenTrackIds = {};
+  final Set<String> _flowExcludedTrackIds = {};
+  final Set<String> _flowProtectedTrackIds = {};
+  final Set<String> _flowSessionPlayedIds = {};
   double _playbackSpeed = 1.0;
+  bool _replayGainEnabled = true;
+  bool _replayGainAlbumMode = false;
+  double _replayGainPreampDb = 0;
   double _flowFamiliarity = .62;
   double _flowVariety = .68;
   Color? _artworkAccentColor;
@@ -245,6 +370,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   List<MusicTrack>? _cachedFavoriteArtistTracks;
   List<MusicTrack>? _cachedRecentlyPlayedTracks;
   bool _flowQueueDirty = true;
+  int? _lastAudioServiceSyncSignature;
 
   bool _connected = false;
   bool _libraryLoaded = false;
@@ -259,7 +385,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _showFlow = false;
   int _flowPage = 0;
   bool _flowActive = false;
+  String? _flowResumeTrackId;
+  int _flowResumePositionMillis = 0;
   bool _showUpNext = false;
+  bool _showLyrics = false;
+  String? _lyricsTrackId;
+  TrackLyrics? _currentLyrics;
+  bool _lyricsLoading = false;
+  String _lyricsError = '';
+  int _lyricsRequestId = 0;
+  final ValueNotifier<int> _lyricsRevision = ValueNotifier(0);
   bool _showVisualizer = false;
   bool _reduceMotion = false;
   bool _autoAdvance = true;
@@ -301,7 +436,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       } else if (wasPlayerOpen && _playerOverlayMounted) {
         _playerUnmountTimer?.cancel();
         _playerUnmountTimer = Timer(
-          _reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
+          _reduceMotion ? Duration.zero : const Duration(milliseconds: 320),
           () {
             if (!mounted || _showPlayer) return;
             setState(() => _playerOverlayMounted = false);
@@ -309,6 +444,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       }
     });
+    _syncAudioService();
+  }
+
+  void _syncAudioService() {
+    final handler = _audioHandler;
+    if (handler == null) return;
+    final queueSignature = Object.hashAll(_queue.map((track) => track.id));
+    final playlistSignature = Object.hashAll(
+      _playlists.entries.map(
+        (entry) => Object.hash(entry.key, Object.hashAll(entry.value)),
+      ),
+    );
+    final signature = Object.hash(
+      identityHashCode(_tracks),
+      _tracks.length,
+      identityHashCode(_localTracks),
+      _localTracks.length,
+      identityHashCode(_queue),
+      queueSignature,
+      _queueIndex,
+      identityHashCode(_history),
+      _history.length,
+      Object.hashAll(_favorites),
+      playlistSignature,
+      _showLocalLibrary,
+      identityHashCode(_client),
+      identityHashCode(_current),
+    );
+    if (signature == _lastAudioServiceSyncSignature) return;
+    _lastAudioServiceSyncSignature = signature;
+    final tracks = _allTracksById.values.toList(growable: false);
+    handler.updateLibrary(
+      tracks: tracks,
+      favorites: _favorites,
+      history: _history,
+      playlists: _playlists,
+      smartPlaylists: {
+        for (final playlist in _smartPlaylists)
+          playlist.title: playlist.tracks.map((track) => track.id).toList(),
+      },
+      mediaItems: tracks.map((track) => _mediaItemForTrack(track, _client)),
+    );
+    handler.updatePlaybackQueue(
+      _queue.map((track) => _mediaItemForTrack(track, _client)).toList(),
+      _queueIndex,
+    );
   }
 
   @override
@@ -320,6 +501,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ..maximumSize = 300
       ..maximumSizeBytes = 64 << 20;
     _restore();
+    _audioSelectTrack = (trackId) async {
+      final track =
+          _allTracksById[trackId] ?? _audioHandler?.trackForId(trackId);
+      if (track != null) await _play(track);
+    };
+    _audioSkipTrack = _skip;
 
     _isPlaying.value = _player.playing;
     _durationNotifier.value = _player.duration;
@@ -382,12 +569,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     for (final subscription in _playerSubscriptions) {
       unawaited(subscription.cancel());
     }
-    _player.dispose();
+    if (!_audioServiceInitializationRequired) _player.dispose();
     _position.dispose();
     _isPlaying.dispose();
     _currentTrackNotifier.dispose();
     _durationNotifier.dispose();
     _queueIndexNotifier.dispose();
+    _lyricsRevision.dispose();
     _search.dispose();
     _url.dispose();
     _username.dispose();
@@ -397,6 +585,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if ((state == AppLifecycleState.paused ||
+            state == AppLifecycleState.detached) &&
+        _flowActive) {
+      unawaited(_saveFlowSession());
+    }
     if (state == AppLifecycleState.resumed && _localFolders.isNotEmpty) {
       unawaited(_scanLocalFolders());
     }
@@ -468,16 +661,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         offset: _showPlayer ? Offset.zero : Offset(0, 1),
                         duration: _reduceMotion
                             ? Duration.zero
-                            : Duration(milliseconds: 180),
+                            : Duration(milliseconds: 320),
                         curve: Curves.easeOutCubic,
-                        child: AnimatedOpacity(
-                          opacity: _showPlayer ? 1 : 0,
+                        child: AnimatedScale(
+                          scale: _showPlayer ? 1 : .985,
                           duration: _reduceMotion
                               ? Duration.zero
-                              : Duration(milliseconds: 140),
-                          child: ListenableBuilder(
-                            listenable: _playbackListenable,
-                            builder: (context, child) => _playerOverlay(),
+                              : Duration(milliseconds: 320),
+                          curve: Curves.easeOutCubic,
+                          child: AnimatedOpacity(
+                            opacity: _showPlayer ? 1 : 0,
+                            duration: _reduceMotion
+                                ? Duration.zero
+                                : Duration(milliseconds: 220),
+                            child: ListenableBuilder(
+                              listenable: _playbackListenable,
+                              builder: (context, child) => _playerOverlay(),
+                            ),
                           ),
                         ),
                       ),

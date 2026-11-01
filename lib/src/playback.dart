@@ -33,18 +33,7 @@ extension _PlaybackMethods on _HomeScreenState {
     }
 
     try {
-      final mediaItem = MediaItem(
-        id: track.id,
-        title: track.title,
-        artist: track.artist,
-        album: track.album,
-        duration: Duration(seconds: track.duration),
-        artUri: track.localArtworkPath != null
-            ? Uri.file(track.localArtworkPath!)
-            : (client?.coverArtUrl(track.coverArt) == null
-                  ? null
-                  : Uri.parse(client!.coverArtUrl(track.coverArt)!)),
-      );
+      final mediaItem = _mediaItemForTrack(track, client);
       final audioSource = track.isLocal
           ? (track.localPath!.startsWith('content://')
                 ? AudioSource.uri(Uri.parse(track.localPath!), tag: mediaItem)
@@ -57,6 +46,7 @@ extension _PlaybackMethods on _HomeScreenState {
       if (requestId != _playRequestId) return;
       await _player.setLoopMode(_repeatOne ? LoopMode.one : LoopMode.off);
       await _player.setSpeed(_playbackSpeed);
+      await _applyReplayGain(track);
       final started = _player.playerStateStream
           .firstWhere((state) => state.playing)
           .timeout(Duration(seconds: 15));
@@ -73,30 +63,46 @@ extension _PlaybackMethods on _HomeScreenState {
       _updateState(() {
         _queue = finalQueue;
         _queueIndex = index;
+        if (_flowActive && _queueIndex > 40) {
+          final discardCount = _queueIndex - 20;
+          _queue.removeRange(0, discardCount);
+          _queueIndex -= discardCount;
+        }
         _current = track;
         _invalidateRecommendationCaches();
         _currentTrackNotifier.value = track;
-        _queueIndexNotifier.value = index;
+        _queueIndexNotifier.value = _queueIndex;
         _artworkAccentColor = null;
         _showPlayer = !_showFlow;
         _showUpNext = false;
+        _showLyrics = false;
         _error = '';
       });
       unawaited(_updateArtworkAccentColor(track));
 
-      unawaited(_saveQueue());
       final event = ListeningEvent(
         id: track.id,
         artist: track.artist,
         album: track.album,
         playedAt: DateTime.now().millisecondsSinceEpoch,
+        genre: track.genre,
       );
       _history = [..._history, event].takeLast(200).toList();
+      _syncAudioService();
+      if (_flowActive) _flowSessionPlayedIds.add(track.id);
       _invalidateRecommendationCaches();
       // History influences the next Flow session, but never reshuffle the
       // active Flow queue just because the current song changed.
       _flowQueueDirty = true;
       _scheduleHistorySave();
+      if (_flowActive) {
+        await _saveFlowQueueState();
+        if (_queue.length - _queueIndex - 1 <= 5) {
+          await _appendFlowBatch();
+        }
+      } else {
+        unawaited(_saveQueue());
+      }
     } catch (error) {
       if (!mounted) return;
       _updateState(() => _error = _describePlaybackError(error));
@@ -137,12 +143,23 @@ extension _PlaybackMethods on _HomeScreenState {
 
   void _removeFromQueue(int index) {
     if (index < 0 || index >= _queue.length || index == _queueIndex) return;
+    final removed = _queue[index];
     _updateState(() {
       _queue.removeAt(index);
+      if (_flowActive) {
+        _flowSessionPlayedIds.add(removed.id);
+        _flowProtectedTrackIds.remove(removed.id);
+        _flowQueueDirty = true;
+      }
       if (index < _queueIndex) _queueIndex--;
       _queueIndexNotifier.value = _queueIndex;
     });
-    unawaited(_saveQueue());
+    if (_flowActive) {
+      unawaited(_saveFlowQueueState());
+      unawaited(_saveFlowProtectedTracks());
+    } else {
+      unawaited(_saveQueue());
+    }
   }
 
   void _moveQueueItem(int from, int to) {
@@ -152,11 +169,18 @@ extension _PlaybackMethods on _HomeScreenState {
         to >= _queue.length) {
       return;
     }
+    final moved = _queue[from];
     _updateState(() {
       final item = _queue.removeAt(from);
       _queue.insert(to, item);
+      if (_flowActive) _flowProtectedTrackIds.add(moved.id);
     });
-    unawaited(_saveQueue());
+    if (_flowActive) {
+      unawaited(_saveFlowQueueState());
+      unawaited(_saveFlowProtectedTracks());
+    } else {
+      unawaited(_saveQueue());
+    }
   }
 
   Future<void> _clearUpcoming() async {
@@ -189,6 +213,41 @@ extension _PlaybackMethods on _HomeScreenState {
     await _player.setSpeed(speed);
     final preferences = await SharedPreferences.getInstance();
     await preferences.setDouble(_speedKey, speed);
+  }
+
+  Future<void> _applyReplayGain(MusicTrack track) => _player.setVolume(
+    _replayGainEnabled
+        ? replayGainVolume(
+            track,
+            useAlbumGain: _replayGainAlbumMode,
+            preampDb: _replayGainPreampDb,
+          )
+        : 1,
+  );
+
+  Future<void> _setReplayGainEnabled(bool enabled) async {
+    _updateState(() => _replayGainEnabled = enabled);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_replayGainEnabledKey, enabled);
+    final track = _current;
+    if (track != null) await _applyReplayGain(track);
+  }
+
+  Future<void> _setReplayGainAlbumMode(bool albumMode) async {
+    _updateState(() => _replayGainAlbumMode = albumMode);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_replayGainAlbumKey, albumMode);
+    final track = _current;
+    if (track != null) await _applyReplayGain(track);
+  }
+
+  Future<void> _setReplayGainPreamp(double preampDb) async {
+    final value = preampDb.clamp(-6.0, 6.0).toDouble();
+    _updateState(() => _replayGainPreampDb = value);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setDouble(_replayGainPreampKey, value);
+    final track = _current;
+    if (track != null) await _applyReplayGain(track);
   }
 
   void _startSleepTimer() {

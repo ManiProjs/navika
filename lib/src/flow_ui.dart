@@ -3,10 +3,14 @@ part of '../main.dart';
 extension _FlowUiMethods on _HomeScreenState {
   Widget _flowOverlay() {
     final accent = C.lime;
-    final preview = _flowActive
-        ? _queue.skip(_queueIndex + 1).take(5).toList()
-        : _buildFlowQueue().take(5).toList();
+    final preview =
+        (_flowActive ? _queue.skip(_queueIndex + 1) : _buildFlowQueue())
+            .take(5)
+            .toList();
     final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
+    final genreTrackCount = _modeTracks
+        .where((track) => track.genre.trim().isNotEmpty)
+        .length;
     if (_flowPage == 0) {
       return _flowWelcome(isMacOS: isMacOS, accent: accent);
     }
@@ -166,7 +170,8 @@ extension _FlowUiMethods on _HomeScreenState {
                                     () => _flowFamiliarity = value,
                                   ),
                                   onChangeEnd: () {
-                                    _flowQueueDirty = true;
+                                    _updateState(() => _flowQueueDirty = true);
+                                    unawaited(_saveFlowPreferences());
                                     if (_flowActive) _refreshFlowQueue();
                                   },
                                 ),
@@ -231,11 +236,23 @@ extension _FlowUiMethods on _HomeScreenState {
                                   onChanged: (value) =>
                                       _updateState(() => _flowVariety = value),
                                   onChangeEnd: () {
-                                    _flowQueueDirty = true;
+                                    _updateState(() => _flowQueueDirty = true);
+                                    unawaited(_saveFlowPreferences());
                                     if (_flowActive) _refreshFlowQueue();
                                   },
                                 ),
                               ],
+                            ),
+                          ),
+                          Padding(
+                            padding: EdgeInsets.only(top: 10, left: 2),
+                            child: Text(
+                              'Flow profile · ${_history.length} listening events · ${_favorites.length} favorites · ${_tasteArtistFeedback.length} artist preferences · $genreTrackCount tracks with genre metadata',
+                              style: TextStyle(
+                                color: C.muted,
+                                fontSize: 10,
+                                height: 1.5,
+                              ),
                             ),
                           ),
                           if (_flowActive && _current != null) ...[
@@ -256,6 +273,7 @@ extension _FlowUiMethods on _HomeScreenState {
                                 _showFlow = false;
                                 _showPlayer = true;
                                 _showUpNext = false;
+                                _showLyrics = false;
                               }),
                               child: Row(
                                 children: [
@@ -302,25 +320,22 @@ extension _FlowUiMethods on _HomeScreenState {
                                       ],
                                     ),
                                   ),
-                                  IconButton(
+                                  _playbackControlButton(
+                                    icon: _player.playing
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded,
                                     tooltip: _player.playing ? 'Pause' : 'Play',
                                     onPressed: _togglePlayback,
-                                    icon: Icon(
-                                      _player.playing
-                                          ? Icons.pause_rounded
-                                          : Icons.play_arrow_rounded,
-                                      color: accent,
-                                      size: 29,
-                                    ),
+                                    primary: true,
+                                    buttonSize: 42,
+                                    iconSize: 22,
                                   ),
-                                  IconButton(
+                                  _playbackControlButton(
+                                    icon: Icons.skip_next_rounded,
                                     tooltip: 'Next track',
                                     onPressed: () => _skip(1),
-                                    icon: Icon(
-                                      Icons.skip_next_rounded,
-                                      color: accent,
-                                      size: 27,
-                                    ),
+                                    buttonSize: 42,
+                                    iconSize: 22,
                                   ),
                                 ],
                               ),
@@ -350,6 +365,47 @@ extension _FlowUiMethods on _HomeScreenState {
                                     ),
                                     label: Text('Less like this'),
                                   ),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              children: [
+                                OutlinedButton.icon(
+                                  onPressed: () => _setCurrentTrackFeedback(2),
+                                  icon: Icon(Icons.favorite_rounded, size: 15),
+                                  label: Text('Love this track'),
+                                ),
+                                OutlinedButton.icon(
+                                  onPressed: _excludeCurrentTrack,
+                                  icon: Icon(Icons.block_rounded, size: 15),
+                                  label: Text('Never this track'),
+                                ),
+                                OutlinedButton.icon(
+                                  onPressed: () =>
+                                      _setArtistFeedback(_current!.artist, 2),
+                                  icon: Icon(
+                                    Icons.person_add_alt_1_rounded,
+                                    size: 15,
+                                  ),
+                                  label: Text('More from artist'),
+                                ),
+                                OutlinedButton.icon(
+                                  onPressed: () =>
+                                      _setArtistFeedback(_current!.artist, -1),
+                                  icon: Icon(
+                                    Icons.person_remove_alt_1_rounded,
+                                    size: 15,
+                                  ),
+                                  label: Text('Less from artist'),
+                                ),
+                                OutlinedButton.icon(
+                                  onPressed: () =>
+                                      _setArtistFeedback(_current!.artist, -2),
+                                  icon: Icon(Icons.block_rounded, size: 15),
+                                  label: Text('Never this artist'),
                                 ),
                               ],
                             ),
@@ -421,15 +477,11 @@ extension _FlowUiMethods on _HomeScreenState {
                                           size: 16,
                                         ),
                                         label: Text(
-                                          'Restore hidden (${_flowHiddenTrackIds.length})',
+                                          'Restore hidden tracks (${_flowHiddenTrackIds.length + _flowExcludedTrackIds.length})',
                                         ),
                                       ),
                                       TextButton.icon(
-                                        onPressed: () => _updateState(() {
-                                          _flowActive = false;
-                                          _showFlow = false;
-                                          _showPlayer = false;
-                                        }),
+                                        onPressed: _endFlow,
                                         icon: Icon(
                                           Icons.stop_circle_outlined,
                                           size: 16,
@@ -437,6 +489,30 @@ extension _FlowUiMethods on _HomeScreenState {
                                         label: Text('End Flow'),
                                       ),
                                     ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          if (_flowActive && _current == null) ...[
+                            SizedBox(height: 20),
+                            _card(
+                              child: Row(
+                                children: [
+                                  Icon(Icons.history_rounded, color: accent),
+                                  SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'Your previous Flow session is ready to resume.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        height: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: _resumeFlowSession,
+                                    child: Text('Resume'),
                                   ),
                                 ],
                               ),
@@ -478,6 +554,11 @@ extension _FlowUiMethods on _HomeScreenState {
                           else
                             ...preview.asMap().entries.map((entry) {
                               final track = entry.value;
+                              final queueIndex = _queueIndex + 1 + entry.key;
+                              final isQueued =
+                                  _flowActive &&
+                                  queueIndex >= 0 &&
+                                  queueIndex < _queue.length;
                               return Padding(
                                 padding: EdgeInsets.only(bottom: 8),
                                 child: Row(
@@ -528,6 +609,78 @@ extension _FlowUiMethods on _HomeScreenState {
                                         ],
                                       ),
                                     ),
+                                    if (isQueued)
+                                      PopupMenuButton<int>(
+                                        tooltip: 'Queue actions',
+                                        onSelected: (action) {
+                                          switch (action) {
+                                            case 0:
+                                              _moveQueueItem(
+                                                queueIndex,
+                                                queueIndex - 1,
+                                              );
+                                              break;
+                                            case 1:
+                                              _moveQueueItem(
+                                                queueIndex,
+                                                queueIndex + 1,
+                                              );
+                                              break;
+                                            case 2:
+                                              _regenerateFlowQueueItem(
+                                                queueIndex,
+                                              );
+                                              break;
+                                            case 3:
+                                              _toggleFlowProtected(track);
+                                              break;
+                                            case 4:
+                                              _play(track);
+                                              break;
+                                            case 5:
+                                              _removeFromQueue(queueIndex);
+                                              break;
+                                          }
+                                        },
+                                        itemBuilder: (context) => [
+                                          PopupMenuItem(
+                                            value: 0,
+                                            enabled:
+                                                queueIndex > _queueIndex + 1,
+                                            child: Text('Move earlier'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 1,
+                                            enabled:
+                                                queueIndex < _queue.length - 1,
+                                            child: Text('Move later'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 2,
+                                            child: Text(
+                                              'Find a different track',
+                                            ),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 3,
+                                            child: Text(
+                                              _flowProtectedTrackIds.contains(
+                                                    track.id,
+                                                  )
+                                                  ? 'Allow automatic changes'
+                                                  : 'Keep in Flow',
+                                            ),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 4,
+                                            child: Text('Play now'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 5,
+                                            child: Text('Remove from queue'),
+                                          ),
+                                        ],
+                                      ),
                                   ],
                                 ),
                               );
@@ -540,7 +693,9 @@ extension _FlowUiMethods on _HomeScreenState {
                               onPressed: _modeTracks.isEmpty
                                   ? null
                                   : (_flowActive
-                                        ? _refreshFlowQueue
+                                        ? (_current == null
+                                              ? _resumeFlowSession
+                                              : _refreshFlowQueue)
                                         : _startFlow),
                               icon: Icon(
                                 _flowActive
@@ -549,7 +704,9 @@ extension _FlowUiMethods on _HomeScreenState {
                               ),
                               label: Text(
                                 _flowActive
-                                    ? 'Refresh upcoming tracks'
+                                    ? (_current == null
+                                          ? 'Resume previous Flow session'
+                                          : 'Refresh upcoming tracks')
                                     : 'Start Navika Flow',
                               ),
                               style: FilledButton.styleFrom(
@@ -563,10 +720,7 @@ extension _FlowUiMethods on _HomeScreenState {
                             SizedBox(
                               width: double.infinity,
                               child: TextButton(
-                                onPressed: () => _updateState(() {
-                                  _flowActive = false;
-                                  _showFlow = false;
-                                }),
+                                onPressed: _endFlow,
                                 child: Text(
                                   'End Flow session',
                                   style: TextStyle(
