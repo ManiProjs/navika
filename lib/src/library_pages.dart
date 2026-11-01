@@ -126,6 +126,10 @@ extension _LibraryPageMethods on _HomeScreenState {
               final visibleTracks = _expandedPlaylists.contains(entry.key)
                   ? tracks
                   : tracks.take(20).toList();
+              final totalSeconds = tracks.fold<int>(
+                0,
+                (total, track) => total + track.duration,
+              );
 
               return Padding(
                 padding: EdgeInsets.only(bottom: 14),
@@ -163,26 +167,53 @@ extension _LibraryPageMethods on _HomeScreenState {
                             icon: Icon(Icons.play_arrow_rounded),
                           ),
                           IconButton(
+                            tooltip: 'Shuffle playlist',
+                            onPressed: tracks.length < 2
+                                ? null
+                                : () {
+                                    final shuffled = tracks.toList()..shuffle();
+                                    _play(shuffled.first, playlist: shuffled);
+                                  },
+                            icon: Icon(Icons.shuffle_rounded),
+                          ),
+                          IconButton(
+                            tooltip: 'Duplicate playlist',
+                            onPressed: () => _duplicatePlaylist(entry.key),
+                            icon: Icon(Icons.copy_rounded),
+                          ),
+                          IconButton(
                             tooltip: 'Delete playlist',
-                            onPressed: () async {
-                              _updateState(() => _playlists.remove(entry.key));
-                              await _savePlaylists();
-                            },
+                            onPressed: () => _deletePlaylist(entry.key),
                             icon: Icon(Icons.close_rounded, color: C.muted),
                           ),
                         ],
                       ),
                       Text(
-                        '${tracks.length} tracks',
+                        '${tracks.length} tracks · ${_formatTime(totalSeconds.toDouble())}',
                         style: TextStyle(color: C.muted, fontSize: 11),
                       ),
                       if (tracks.isNotEmpty) ...[
                         SizedBox(height: 12),
-                        ...visibleTracks.asMap().entries.map(
-                          (item) => _playlistTrackRow(
-                            entry.key,
-                            item.value,
-                            item.key,
+                        ReorderableListView.builder(
+                          shrinkWrap: true,
+                          physics: NeverScrollableScrollPhysics(),
+                          buildDefaultDragHandles: false,
+                          itemCount: visibleTracks.length,
+                          onReorderItem: (oldIndex, newIndex) =>
+                              _reorderPlaylistTracks(
+                                entry.key,
+                                visibleTracks,
+                                oldIndex,
+                                newIndex,
+                              ),
+                          itemBuilder: (context, index) => KeyedSubtree(
+                            key: ValueKey(visibleTracks[index].id),
+                            child: _playlistTrackRow(
+                              entry.key,
+                              visibleTracks[index],
+                              index,
+                              reorderIndex: index,
+                            ),
                           ),
                         ),
                         if (tracks.length > 20)
@@ -216,6 +247,76 @@ extension _LibraryPageMethods on _HomeScreenState {
         ],
       ],
     );
+  }
+
+  Future<void> _duplicatePlaylist(String name) async {
+    final source = _playlists[name];
+    if (source == null) return;
+    var copyName = '$name (copy)';
+    var suffix = 2;
+    while (_playlists.containsKey(copyName)) {
+      copyName = '$name (copy $suffix)';
+      suffix++;
+    }
+    _updateState(() => _playlists[copyName] = List<String>.of(source));
+    await _savePlaylists();
+  }
+
+  Future<void> _deletePlaylist(String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: C.surface,
+        title: Text('Delete playlist?'),
+        content: Text(
+          '“$name” will be removed. Your music files will not be affected.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    _updateState(() {
+      _playlists.remove(name);
+      _expandedPlaylists.remove(name);
+    });
+    await _savePlaylists();
+  }
+
+  Future<void> _reorderPlaylistTracks(
+    String playlist,
+    List<MusicTrack> visibleTracks,
+    int oldIndex,
+    int newIndex,
+  ) async {
+    final ids = _playlists[playlist];
+    if (ids == null || oldIndex < 0 || oldIndex >= visibleTracks.length) {
+      return;
+    }
+    final reorderedVisible = visibleTracks.map((track) => track.id).toList();
+    final moved = reorderedVisible.removeAt(oldIndex);
+    reorderedVisible.insert(
+      newIndex.clamp(0, reorderedVisible.length).toInt(),
+      moved,
+    );
+    var visibleIndex = 0;
+    _updateState(() {
+      for (var index = 0; index < ids.length; index++) {
+        if (reorderedVisible.contains(ids[index]) &&
+            visibleTracks.any((track) => track.id == ids[index])) {
+          ids[index] = reorderedVisible[visibleIndex++];
+        }
+      }
+    });
+    await _savePlaylists();
   }
 
   Future<void> _renamePlaylist(String oldName) async {
@@ -293,7 +394,12 @@ extension _LibraryPageMethods on _HomeScreenState {
     await _savePlaylists();
   }
 
-  Widget _playlistTrackRow(String playlist, MusicTrack track, int index) {
+  Widget _playlistTrackRow(
+    String playlist,
+    MusicTrack track,
+    int index, {
+    int? reorderIndex,
+  }) {
     final active = _current?.id == track.id;
     return InkWell(
       onTap: () => _play(
@@ -357,6 +463,18 @@ extension _LibraryPageMethods on _HomeScreenState {
               _formatTime(track.duration.toDouble()),
               style: TextStyle(color: C.muted, fontSize: 10),
             ),
+            if (reorderIndex != null)
+              ReorderableDragStartListener(
+                index: reorderIndex,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: Icon(
+                    Icons.drag_handle_rounded,
+                    color: C.muted,
+                    size: 20,
+                  ),
+                ),
+              ),
             IconButton(
               tooltip: 'Remove from playlist',
               visualDensity: VisualDensity.compact,
