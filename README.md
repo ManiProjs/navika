@@ -70,7 +70,7 @@ flutter test
 
 ## Data and privacy
 
-Navika stores ordinary app preferences, favorites, local playlists, and listening history in local app preferences. Listening history is used by the on-device recommendation algorithm and stats views. Navidrome credentials are stored using Android Keystore-backed AES-GCM on Android, the Secret Service keyring on Linux, and Windows DPAPI on Windows. Linux desktop builds require a working Secret Service keyring and `secret-tool`; credential saving fails closed if it is unavailable. On iOS and macOS, credentials remain in plain-text app preferences, and the app displays this warning: `WARNING: Your Navidrome credentials are stored in plain text because of.... well.... Apple!.` Keep your device account protected and only connect to servers you trust. HTTPS is required for all server connections.
+Navika stores ordinary app preferences, favorites, local playlists, and listening history in local app preferences. Listening history is used by the on-device recommendation algorithm and stats views. Navidrome credentials are stored using Android Keystore-backed AES-GCM on Android, the Secret Service keyring on Linux, and Windows DPAPI on Windows. Linux desktop builds require a working Secret Service keyring and `secret-tool`; credential saving fails closed if it is unavailable. On iOS and macOS, credentials remain in plain-text app preferences, and the app displays this warning: `WARNING: Your Navidrome credentials are stored in plain text because of.... well.... Apple!.` Keep your device account protected and only connect to servers you trust.
 
 Recommendations are algorithmic and local; the current project does not require a cloud AI provider. Music files and streaming are served by your Navidrome server.
 
